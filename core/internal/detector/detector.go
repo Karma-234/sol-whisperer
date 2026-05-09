@@ -1,13 +1,13 @@
-package core
+package detector
 
 import (
 	"github.com/karma-234/sol-whisperer/core"
 	"github.com/karma-234/sol-whisperer/core/internal/types"
 )
 
-// SourceNameMap normalizes Helius source labels to our internal program names.
+// SourceNameMap normalizes Helius source labels to internal names.
 var SourceNameMap = map[string]string{
-	"RAYDIUM":  "raydium_v4", // default to v4; inspect instructions for exact version
+	"RAYDIUM":  "raydium_v4",
 	"PUMP_AMM": "pump_fun",
 	"JUPITER":  "jupiter",
 	"ORCA":     "orca",
@@ -15,22 +15,62 @@ var SourceNameMap = map[string]string{
 	"MARINADE": "marinade",
 }
 
-// DetectedProgram holds matched program info.
 type DetectedProgram struct {
-	Address string // on-chain program address
-	Name    string // internal name from ProgramNames
+	Address string
+	Name    string
 }
 
-// DetectProgramsFromInstructions walks all instructions (including inner)
-// and returns matched program names and addresses from the webhook tx.
-func DetectProgramsFromInstructions(tx types.HeliusEnhancedWebhookTx) []DetectedProgram {
-	seen := make(map[string]struct{}) // dedup by address
-	var result []DetectedProgram
+// SwapInfo returns the core fields you asked for:
+// - Swapper: wallet address that performed the swap
+// - OutputMint: token CA they swapped to
+// - OutputAmount: raw amount received
+type SwapInfo struct {
+	Signature        string
+	Timestamp        int64
+	Source           string
+	Swapper          string
+	OutputMint       string
+	OutputAmount     string
+	OutputDecimals   uint8
+	InputMint        string
+	InputAmount      string
+	DetectedPrograms []DetectedProgram
+	Fee              uint64
+	FeePayer         string
+	Description      string
+}
 
-	var walk func(ix types.HeliusInstruction)
-	walk = func(ix types.HeliusInstruction) {
+func NormalizeSourceLabel(source string) string {
+	if normalized, ok := SourceNameMap[source]; ok {
+		return normalized
+	}
+	return source
+}
+
+// Non-recursive DFS. Faster and avoids missing inner instructions when parent program IDs repeat.
+func DetectProgramsFromInstructions(tx types.HeliusEnhancedWebhookTx) []DetectedProgram {
+	if len(tx.Instructions) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(tx.Instructions)*2)
+	result := make([]DetectedProgram, 0, 4)
+
+	stack := make([]types.HeliusInstruction, 0, len(tx.Instructions))
+	stack = append(stack, tx.Instructions...)
+
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		ix := stack[last]
+		stack = stack[:last]
+
+		// Always traverse inner instructions, even if this program ID was seen before.
+		if len(ix.InnerInstructions) > 0 {
+			stack = append(stack, ix.InnerInstructions...)
+		}
+
 		if _, exists := seen[ix.ProgramID]; exists {
-			return
+			continue
 		}
 		seen[ix.ProgramID] = struct{}{}
 
@@ -40,60 +80,106 @@ func DetectProgramsFromInstructions(tx types.HeliusEnhancedWebhookTx) []Detected
 				Name:    name,
 			})
 		}
-
-		for _, inner := range ix.InnerInstructions {
-			walk(inner)
-		}
-	}
-
-	for _, ix := range tx.Instructions {
-		walk(ix)
 	}
 
 	return result
 }
 
-// NormalizeSourceLabel maps the Helius source string to our internal name,
-// falling back to the source string if no mapping exists.
-func NormalizeSourceLabel(source string) string {
-	if normalized, ok := SourceNameMap[source]; ok {
-		return normalized
-	}
-	return source // passthrough if unknown
-}
-
-// SwapInfo is a normalized representation of a swap event.
-type SwapInfo struct {
-	Signature        string
-	Timestamp        int64
-	Source           string            // normalized internal name
-	DetectedPrograms []DetectedProgram // matched ProgramID + name pairs
-	TokenInputs      []types.HeliusTokenAmountEvent
-	TokenOutputs     []types.HeliusTokenAmountEvent
-	NativeInput      *types.HeliusNativeAmount
-	NativeOutput     *types.HeliusNativeAmount
-	Fee              uint64
-	FeePayer         string
-	Description      string
-}
-
-// ExtractSwapInfo normalizes a SWAP transaction into actionable struct.
+// Default keeps old behavior.
 func ExtractSwapInfo(tx types.HeliusEnhancedWebhookTx) *SwapInfo {
+	return ExtractSwapInfoWithOptions(tx, true)
+}
+
+// Set detectPrograms=false on hot paths for lower latency.
+func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms bool) *SwapInfo {
 	if tx.Type != "SWAP" || tx.Events.Swap == nil {
 		return nil
 	}
 
-	return &SwapInfo{
+	swap := tx.Events.Swap
+
+	var detected []DetectedProgram
+	if detectPrograms {
+		detected = DetectProgramsFromInstructions(tx)
+	}
+
+	info := &SwapInfo{
 		Signature:        tx.Signature,
 		Timestamp:        tx.Timestamp,
 		Source:           NormalizeSourceLabel(tx.Source),
-		DetectedPrograms: DetectProgramsFromInstructions(tx),
-		TokenInputs:      tx.Events.Swap.TokenInputs,
-		TokenOutputs:     tx.Events.Swap.TokenOutputs,
-		NativeInput:      tx.Events.Swap.NativeInput,
-		NativeOutput:     tx.Events.Swap.NativeOutput,
+		Swapper:          tx.FeePayer, // best default for "who swapped"
+		DetectedPrograms: detected,
 		Fee:              tx.Fee,
 		FeePayer:         tx.FeePayer,
 		Description:      tx.Description,
 	}
+
+	// Input side.
+	if len(swap.TokenInputs) > 0 {
+		in := pickInputForSwapper(swap.TokenInputs, info.Swapper)
+		info.InputMint = in.Mint
+		info.InputAmount = in.RawTokenAmount.TokenAmount
+		if info.Swapper == "" && in.UserAccount != "" {
+			info.Swapper = in.UserAccount
+		}
+	} else if swap.NativeInput != nil {
+		info.InputMint = "SOL"
+		info.InputAmount = swap.NativeInput.Amount
+		if info.Swapper == "" {
+			info.Swapper = swap.NativeInput.Account
+		}
+	}
+
+	// Output side: token CA + amount swapped to.
+	if len(swap.TokenOutputs) > 0 {
+		out := pickOutputForSwapper(swap.TokenOutputs, info.Swapper)
+		info.OutputMint = out.Mint
+		info.OutputAmount = out.RawTokenAmount.TokenAmount
+		info.OutputDecimals = out.RawTokenAmount.Decimals
+		if info.Swapper == "" && out.UserAccount != "" {
+			info.Swapper = out.UserAccount
+		}
+	} else if swap.NativeOutput != nil {
+		// When output is native SOL.
+		info.OutputMint = "SOL"
+		info.OutputAmount = swap.NativeOutput.Amount
+		info.OutputDecimals = 9
+		if info.Swapper == "" {
+			info.Swapper = swap.NativeOutput.Account
+		}
+	}
+
+	return info
+}
+
+func pickOutputForSwapper(outputs []types.HeliusTokenAmountEvent, swapper string) types.HeliusTokenAmountEvent {
+	if len(outputs) == 0 {
+		return types.HeliusTokenAmountEvent{}
+	}
+
+	if swapper != "" {
+		for _, o := range outputs {
+			if o.UserAccount == swapper {
+				return o
+			}
+		}
+	}
+
+	return outputs[0]
+}
+
+func pickInputForSwapper(inputs []types.HeliusTokenAmountEvent, swapper string) types.HeliusTokenAmountEvent {
+	if len(inputs) == 0 {
+		return types.HeliusTokenAmountEvent{}
+	}
+
+	if swapper != "" {
+		for _, in := range inputs {
+			if in.UserAccount == swapper {
+				return in
+			}
+		}
+	}
+
+	return inputs[0]
 }
