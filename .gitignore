@@ -1,0 +1,28 @@
+*.env
+.env.*
+
+# Ignore build artifacts
+/bin/
+/build/
+/dist/
+
+# Ignore IDE and editor files
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db   
+
+# Ignore log files
+*.log
+
+# Ignore test output
+/test-output/
+*_test.go
+
+
+# Ignore script files
+*.sh
