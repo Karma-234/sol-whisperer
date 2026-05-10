@@ -72,19 +72,24 @@ func (s *TelegramSink) Send(ctx context.Context, a processor.Alert) error {
 }
 
 func buildMessage(a processor.Alert) string {
-	return strings.Join([]string{
-		"<b>Volume spike detected</b>",
-		"",
-		"<b>Mint:</b> " + escapeHTML(a.Mint),
-		"<b>Swapper:</b> " + escapeHTML(a.Swapper),
-		"<b>Source:</b> " + escapeHTML(a.Source),
-		"<b>Window:</b> " + strconv.FormatInt(a.WindowSec, 10) + "s",
-		"<b>Trades:</b> " + strconv.FormatUint(uint64(a.TradeCount), 10),
-		"<b>Volume raw:</b> " + strconv.FormatUint(a.VolumeRaw, 10),
-		"<b>Baseline EWMA:</b> " + trimFloat(a.BaselineEWMA),
-		"<b>Spike ratio:</b> " + trimFloat(a.SpikeRatio),
-		"<b>Signature:</b> " + escapeHTML(a.Signature),
-	}, "\n")
+	var lines []string
+	lines = append(lines, "<b>Volume spike detected</b>")
+	lines = append(lines, "")
+
+	if a.TokenName != "" {
+		lines = append(lines, "<b>Token:</b> "+escapeHTML(a.TokenName))
+	}
+	lines = append(lines, "<b>Mint:</b> "+escapeHTML(a.Mint))
+	lines = append(lines, "<b>Swapper:</b> "+escapeHTML(a.Swapper))
+	lines = append(lines, "<b>Source:</b> "+escapeHTML(a.Source))
+	lines = append(lines, "<b>Window:</b> "+strconv.FormatInt(a.WindowSec, 10)+"s")
+	lines = append(lines, "<b>Trades:</b> "+strconv.FormatUint(uint64(a.TradeCount), 10))
+	lines = append(lines, "<b>Volume raw:</b> "+strconv.FormatUint(a.VolumeRaw, 10))
+	lines = append(lines, "<b>Baseline EWMA:</b> "+trimFloat(a.BaselineEWMA))
+	lines = append(lines, "<b>Spike ratio:</b> "+trimFloat(a.SpikeRatio))
+	lines = append(lines, "<b>Signature:</b> "+escapeHTML(a.Signature))
+
+	return strings.Join(lines, "\n")
 }
 
 func escapeHTML(s string) string {

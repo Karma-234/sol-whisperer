@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
@@ -11,11 +12,17 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/karma-234/sol-whisperer/core/internal/alert"
 	"github.com/karma-234/sol-whisperer/core/internal/handler"
+	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 	"github.com/karma-234/sol-whisperer/core/internal/processor"
 )
 
 func main() {
 	telegramSink := alert.NewTelegramSink(os.Getenv("TELEGRAM_BOT_TOKEN"), os.Getenv("TELEGRAM_CHAT_ID"))
+	metadataFetcher := metadata.NewFetcher()
+	if err := metadataFetcher.LoadJupiterList(context.Background()); err != nil {
+		slog.Error("Failed to load Jupiter token list", slog.String("error", err.Error()))
+	}
+	metadataFetcher.StartAutoRefresh()
 
 	engine := processor.New(processor.Config{
 		Shards:           16,
@@ -27,7 +34,7 @@ func main() {
 		SpikeMultiple:    3.0,
 		EWMAAlpha:        0.2,
 		AlertCooldownSec: 30,
-	}, telegramSink)
+	}, telegramSink, metadataFetcher)
 	h := handler.NewWebhookHandler(os.Getenv("WEBHOOK_SECRET"), engine)
 	app := fiber.New()
 	app.Post("/webhook", h.WebHookHandler)
@@ -66,4 +73,5 @@ func main() {
 
 	<-quit
 	slog.Info("Shutting down server...")
+	metadataFetcher.Stop()
 }
