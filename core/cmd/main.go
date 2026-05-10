@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"golang.org/x/sync/errgroup"
 	"github.com/karma-234/sol-whisperer/core"
 	"github.com/karma-234/sol-whisperer/core/internal/alert"
 	"github.com/karma-234/sol-whisperer/core/internal/enrichment"
@@ -19,6 +18,7 @@ import (
 	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 	"github.com/karma-234/sol-whisperer/core/internal/processor"
 	"github.com/karma-234/sol-whisperer/core/internal/ws"
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {

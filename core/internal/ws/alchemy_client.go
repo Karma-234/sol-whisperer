@@ -17,37 +17,37 @@ import (
 
 // AlchemyClient manages a persistent WebSocket connection to Alchemy
 type AlchemyClient struct {
-	wsURL              string
-	conn               *websocket.Conn
-	connMu             sync.Mutex
-	subscriptions      map[string]int // program ID -> subscription ID
-	subscriptionMu     sync.RWMutex
-	nextID             int
-	nextIDMu           sync.Mutex
-	requestTimeout     time.Duration
-	reconnectMinBackoff time.Duration
-	reconnectMaxBackoff time.Duration
-	circuitBreakerFailures int
+	wsURL                   string
+	conn                    *websocket.Conn
+	connMu                  sync.Mutex
+	subscriptions           map[string]int // program ID -> subscription ID
+	subscriptionMu          sync.RWMutex
+	nextID                  int
+	nextIDMu                sync.Mutex
+	requestTimeout          time.Duration
+	reconnectMinBackoff     time.Duration
+	reconnectMaxBackoff     time.Duration
+	circuitBreakerFailures  int
 	circuitBreakerThreshold int
-	circuitBreakerTimeout time.Duration
-	lastFailureTime    *time.Time
-	failureMu          sync.Mutex
-	isConnected        atomic.Bool
-	stopCh             chan struct{}
-	notificationCh     chan *ProgramNotification
-	logger             *slog.Logger
+	circuitBreakerTimeout   time.Duration
+	lastFailureTime         *time.Time
+	failureMu               sync.Mutex
+	isConnected             atomic.Bool
+	stopCh                  chan struct{}
+	notificationCh          chan *ProgramNotification
+	logger                  *slog.Logger
 }
 
 // AlchemyClientConfig holds configuration for AlchemyClient
 type AlchemyClientConfig struct {
-	WSURL                       string
-	RequestTimeout              time.Duration
-	ReconnectMinBackoff         time.Duration
-	ReconnectMaxBackoff         time.Duration
-	CircuitBreakerThreshold     int
-	CircuitBreakerTimeout       time.Duration
-	NotificationBufferSize      int
-	Logger                      *slog.Logger
+	WSURL                   string
+	RequestTimeout          time.Duration
+	ReconnectMinBackoff     time.Duration
+	ReconnectMaxBackoff     time.Duration
+	CircuitBreakerThreshold int
+	CircuitBreakerTimeout   time.Duration
+	NotificationBufferSize  int
+	Logger                  *slog.Logger
 }
 
 // NewAlchemyClient creates a new Alchemy WebSocket client
@@ -75,16 +75,16 @@ func NewAlchemyClient(cfg AlchemyClientConfig) *AlchemyClient {
 	}
 
 	return &AlchemyClient{
-		wsURL:                       cfg.WSURL,
-		subscriptions:               make(map[string]int),
-		requestTimeout:              cfg.RequestTimeout,
-		reconnectMinBackoff:         cfg.ReconnectMinBackoff,
-		reconnectMaxBackoff:         cfg.ReconnectMaxBackoff,
-		circuitBreakerThreshold:     cfg.CircuitBreakerThreshold,
-		circuitBreakerTimeout:       cfg.CircuitBreakerTimeout,
-		stopCh:                      make(chan struct{}),
-		notificationCh:              make(chan *ProgramNotification, cfg.NotificationBufferSize),
-		logger:                      cfg.Logger,
+		wsURL:                   cfg.WSURL,
+		subscriptions:           make(map[string]int),
+		requestTimeout:          cfg.RequestTimeout,
+		reconnectMinBackoff:     cfg.ReconnectMinBackoff,
+		reconnectMaxBackoff:     cfg.ReconnectMaxBackoff,
+		circuitBreakerThreshold: cfg.CircuitBreakerThreshold,
+		circuitBreakerTimeout:   cfg.CircuitBreakerTimeout,
+		stopCh:                  make(chan struct{}),
+		notificationCh:          make(chan *ProgramNotification, cfg.NotificationBufferSize),
+		logger:                  cfg.Logger,
 	}
 }
 
