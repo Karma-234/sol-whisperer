@@ -66,13 +66,13 @@ type HeliusNativeTransfer struct {
 }
 
 type HeliusTokenTransfer struct {
-	FromUserAccount  string `json:"fromUserAccount"`
-	ToUserAccount    string `json:"toUserAccount"`
-	FromTokenAccount string `json:"fromTokenAccount,omitempty"`
-	ToTokenAccount   string `json:"toTokenAccount,omitempty"`
-	TokenAmount      uint64 `json:"tokenAmount"`
-	Mint             string `json:"mint"`
-	TokenStandard    string `json:"tokenStandard,omitempty"`
+	FromUserAccount  string  `json:"fromUserAccount"`
+	ToUserAccount    string  `json:"toUserAccount"`
+	FromTokenAccount string  `json:"fromTokenAccount,omitempty"`
+	ToTokenAccount   string  `json:"toTokenAccount,omitempty"`
+	TokenAmount      float64 `json:"tokenAmount"` // Changed from uint64
+	Mint             string  `json:"mint"`
+	TokenStandard    string  `json:"tokenStandard,omitempty"`
 }
 
 type HeliusAccountData struct {
