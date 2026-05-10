@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/karma-234/sol-whisperer/core/internal/detector"
@@ -27,6 +28,7 @@ func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 	}
 	var payload types.HeliusEnhancedWebhookPayload
 	if err := c.BodyParser(&payload); err != nil {
+		slog.Info("Failed to parse webhook payload", slog.String("error", err.Error()))
 		return c.Status(400).SendString("Invalid payload")
 	}
 	for i := range payload {
