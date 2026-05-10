@@ -1,0 +1,45 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t sol-whisperer .
+
+      - name: Save image as tar
+        run: docker save sol-whisperer | gzip > sol-whisperer.tar.gz
+
+      - name: Copy image to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: sol-whisperer.tar.gz
+          target: /home/ec2-user
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker load < /home/ec2-user/sol-whisperer.tar.gz
+            docker stop sol-whisperer || true
+            docker rm sol-whisperer || true
+            docker run -d \
+              --name sol-whisperer \
+              --restart always \
+              -p 8080:8080 \
+              --env-file /etc/environment \
+              sol-whisperer
+            rm /home/ec2-user/sol-whisperer.tar.gz
