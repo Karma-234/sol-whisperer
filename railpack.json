@@ -1,6 +1,9 @@
 {
   "$schema": "https://schema.railpack.com",
-  "deploy": {
+  "build": {
     "buildCommand": "go build -ldflags=\"-w -s\" -o out ./core/cmd/"
+  },
+  "deploy": {
+    "startCommand": "./out"
   }
 }
