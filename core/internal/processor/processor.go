@@ -1,13 +1,20 @@
 package processor
 
 import (
+	"context"
+	"errors"
 	"hash/fnv"
+	"io"
+	"math"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/karma-234/sol-whisperer/core/internal/detector"
 )
+
+var ErrShardQueueFull = errors.New("shard queue full")
 
 type Event struct {
 	Signature  string
@@ -18,36 +25,67 @@ type Event struct {
 	Source     string
 }
 
+type Alert struct {
+	Mint         string
+	Swapper      string
+	Signature    string
+	Source       string
+	VolumeRaw    uint64
+	TradeCount   uint32
+	BaselineEWMA float64
+	SpikeRatio   float64
+	WindowSec    int64
+	DetectedAt   int64
+}
+
+type AlertSink interface {
+	Send(context.Context, Alert) error
+}
+
 type Counters struct {
-	Enqueued uint64
-	Dropped  uint64
-	Handled  uint64
+	Enqueued     uint64
+	Dropped      uint64
+	Handled      uint64
+	AlertQueued  uint64
+	AlertDropped uint64
+	AlertSent    uint64
 }
 
 type Config struct {
-	Shards        int
-	QueuePerShard int
-
-	WindowSec     int64
-	MinVolumeRaw  uint64
-	MinTrades     uint32
-	SpikeMultiple float64
-	EWMAAlpha     float64
+	Shards           int
+	QueuePerShard    int
+	AlertQueue       int
+	WindowSec        int64
+	MinVolumeRaw     uint64
+	MinTrades        uint32
+	SpikeMultiple    float64
+	EWMAAlpha        float64
+	AlertCooldownSec int64
 }
 
 type Engine struct {
-	cfg      Config
-	shards   []chan Event
-	stats    Counters
-	detector *SpikeDetector
+	cfg    Config
+	shards []chan Event
+	alerts chan Alert
+	sink   AlertSink
+
+	enqueued     uint64
+	dropped      uint64
+	handled      uint64
+	alertQueued  uint64
+	alertDropped uint64
+	alertSent    uint64
 }
 
-func New(cfg Config) *Engine {
+func New(cfg Config, sink AlertSink) *Engine {
 	if cfg.Shards <= 0 {
-		cfg.Shards = 16
+		cfg.Shards = max(2*runtime.NumCPU(), 16)
 	}
 	if cfg.QueuePerShard <= 0 {
 		cfg.QueuePerShard = 2048
+	}
+	if cfg.AlertQueue <= 0 {
+		cfg.AlertQueue = 1024
 	}
 	if cfg.WindowSec <= 0 {
 		cfg.WindowSec = 60
@@ -58,36 +96,38 @@ func New(cfg Config) *Engine {
 	if cfg.EWMAAlpha <= 0 || cfg.EWMAAlpha >= 1 {
 		cfg.EWMAAlpha = 0.2
 	}
+	if cfg.AlertCooldownSec <= 0 {
+		cfg.AlertCooldownSec = 30
+	}
 
 	e := &Engine{
-		cfg:      cfg,
-		shards:   make([]chan Event, cfg.Shards),
-		detector: NewSpikeDetector(cfg),
+		cfg:    cfg,
+		shards: make([]chan Event, cfg.Shards),
+		alerts: make(chan Alert, cfg.AlertQueue),
+		sink:   sink,
 	}
 
 	for i := 0; i < cfg.Shards; i++ {
 		ch := make(chan Event, cfg.QueuePerShard)
 		e.shards[i] = ch
-		go e.worker(ch)
+		go e.runShard(ch)
 	}
+
+	if sink != nil {
+		go e.runAlertWorker()
+	}
+
 	return e
 }
 
-func (e *Engine) worker(ch <-chan Event) {
-	for ev := range ch {
-		e.detector.Process(ev)
-		atomic.AddUint64(&e.stats.Handled, 1)
-	}
-}
-
-func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) {
+func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) error {
 	if info == nil || info.OutputMint == "" || info.OutputAmount == "" || info.Timestamp <= 0 {
-		return
+		return nil
 	}
 
 	amt, err := strconv.ParseUint(info.OutputAmount, 10, 64)
 	if err != nil || amt == 0 {
-		return
+		return nil
 	}
 
 	ev := Event{
@@ -100,31 +140,68 @@ func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) {
 	}
 
 	sh := shardForMint(ev.OutputMint, len(e.shards))
-
-	// Latency-first overload policy: drop newest when full.
 	select {
 	case e.shards[sh] <- ev:
-		atomic.AddUint64(&e.stats.Enqueued, 1)
+		atomic.AddUint64(&e.enqueued, 1)
+		return nil
 	default:
-		atomic.AddUint64(&e.stats.Dropped, 1)
+		atomic.AddUint64(&e.dropped, 1)
+		return ErrShardQueueFull
 	}
 }
 
 func (e *Engine) Stats() Counters {
 	return Counters{
-		Enqueued: atomic.LoadUint64(&e.stats.Enqueued),
-		Dropped:  atomic.LoadUint64(&e.stats.Dropped),
-		Handled:  atomic.LoadUint64(&e.stats.Handled),
+		Enqueued:     atomic.LoadUint64(&e.enqueued),
+		Dropped:      atomic.LoadUint64(&e.dropped),
+		Handled:      atomic.LoadUint64(&e.handled),
+		AlertQueued:  atomic.LoadUint64(&e.alertQueued),
+		AlertDropped: atomic.LoadUint64(&e.alertDropped),
+		AlertSent:    atomic.LoadUint64(&e.alertSent),
+	}
+}
+
+func (e *Engine) runShard(ch <-chan Event) {
+	state := newShardState(e.cfg)
+	for ev := range ch {
+		if alert, ok := state.process(ev); ok {
+			e.enqueueAlert(alert)
+		}
+		atomic.AddUint64(&e.handled, 1)
+	}
+}
+
+func (e *Engine) enqueueAlert(alert Alert) {
+	if e.sink == nil || alert.Mint == "" {
+		return
+	}
+
+	select {
+	case e.alerts <- alert:
+		atomic.AddUint64(&e.alertQueued, 1)
+	default:
+		atomic.AddUint64(&e.alertDropped, 1)
+	}
+}
+
+func (e *Engine) runAlertWorker() {
+	for alert := range e.alerts {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := e.sink.Send(ctx, alert)
+		cancel()
+		if err == nil {
+			atomic.AddUint64(&e.alertSent, 1)
+		}
 	}
 }
 
 func shardForMint(m string, mod int) int {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(m))
+	_, _ = io.WriteString(h, m)
 	return int(h.Sum32() % uint32(mod))
 }
 
-type mintState struct {
+type mintWindow struct {
 	volSlots []uint64
 	cntSlots []uint32
 
@@ -132,86 +209,90 @@ type mintState struct {
 	totalCnt uint32
 	lastSec  int64
 	ewma     float64
+
+	lastAlertSec int64
 }
 
 type shardState struct {
-	byMint map[string]*mintState
+	cfg    Config
+	byMint map[string]*mintWindow
 }
 
-type SpikeDetector struct {
-	windowSec int64
-	minVol    uint64
-	minTrades uint32
-	multiple  float64
-	alpha     float64
-
-	// sharded by same shard function to avoid cross-locking
-	states []shardState
-}
-
-func NewSpikeDetector(cfg Config) *SpikeDetector {
-	d := &SpikeDetector{
-		windowSec: cfg.WindowSec,
-		minVol:    cfg.MinVolumeRaw,
-		minTrades: cfg.MinTrades,
-		multiple:  cfg.SpikeMultiple,
-		alpha:     cfg.EWMAAlpha,
-		states:    make([]shardState, cfg.Shards),
+func newShardState(cfg Config) *shardState {
+	return &shardState{
+		cfg:    cfg,
+		byMint: make(map[string]*mintWindow, 1024),
 	}
-	for i := range d.states {
-		d.states[i].byMint = make(map[string]*mintState, 1024)
-	}
-	return d
 }
 
-func (d *SpikeDetector) Process(ev Event) {
-	sh := shardForMint(ev.OutputMint, len(d.states))
-	ss := &d.states[sh]
-
-	ms, ok := ss.byMint[ev.OutputMint]
+func (s *shardState) process(ev Event) (Alert, bool) {
+	w, ok := s.byMint[ev.OutputMint]
 	if !ok {
-		ms = &mintState{
-			volSlots: make([]uint64, d.windowSec),
-			cntSlots: make([]uint32, d.windowSec),
+		w = &mintWindow{
+			volSlots: make([]uint64, s.cfg.WindowSec),
+			cntSlots: make([]uint32, s.cfg.WindowSec),
 			lastSec:  ev.Timestamp,
 		}
-		ss.byMint[ev.OutputMint] = ms
+		s.byMint[ev.OutputMint] = w
 	}
 
-	d.advance(ms, ev.Timestamp)
+	s.advance(w, ev.Timestamp)
 
-	idx := ev.Timestamp % d.windowSec
-	ms.volSlots[idx] += ev.OutputAmt
-	ms.cntSlots[idx]++
-	ms.totalVol += ev.OutputAmt
-	ms.totalCnt++
+	idx := ev.Timestamp % s.cfg.WindowSec
+	w.volSlots[idx] += ev.OutputAmt
+	w.cntSlots[idx]++
+	w.totalVol += ev.OutputAmt
+	w.totalCnt++
 
-	cur := float64(ms.totalVol)
-	if ms.ewma == 0 {
-		ms.ewma = cur
+	cur := float64(w.totalVol)
+	if w.ewma == 0 {
+		w.ewma = cur
 	} else {
-		ms.ewma = d.alpha*cur + (1.0-d.alpha)*ms.ewma
+		w.ewma = s.cfg.EWMAAlpha*cur + (1.0-s.cfg.EWMAAlpha)*w.ewma
 	}
 
-	if ms.totalVol >= d.minVol && ms.totalCnt >= d.minTrades && ms.ewma > 0 && cur >= d.multiple*ms.ewma {
-		// Put alert callback here (publish, log, webhook, etc.)
-		_ = time.Now()
+	if w.totalVol < s.cfg.MinVolumeRaw || w.totalCnt < s.cfg.MinTrades || w.ewma <= 0 || cur < s.cfg.SpikeMultiple*math.Max(w.ewma, 1) {
+		return Alert{}, false
 	}
+
+	if ev.Timestamp-w.lastAlertSec < s.cfg.AlertCooldownSec {
+		return Alert{}, false
+	}
+	w.lastAlertSec = ev.Timestamp
+
+	return Alert{
+		Mint:         ev.OutputMint,
+		Swapper:      ev.Swapper,
+		Signature:    ev.Signature,
+		Source:       ev.Source,
+		VolumeRaw:    w.totalVol,
+		TradeCount:   w.totalCnt,
+		BaselineEWMA: w.ewma,
+		SpikeRatio:   cur / math.Max(w.ewma, 1),
+		WindowSec:    s.cfg.WindowSec,
+		DetectedAt:   ev.Timestamp,
+	}, true
 }
 
-func (d *SpikeDetector) advance(ms *mintState, toSec int64) {
-	if toSec <= ms.lastSec {
+func (s *shardState) advance(w *mintWindow, toSec int64) {
+	if toSec <= w.lastSec {
 		return
 	}
-	step := min(toSec-ms.lastSec, d.windowSec)
-	for i := int64(1); i <= step; i++ {
-		sec := ms.lastSec + i
-		idx := sec % d.windowSec
 
-		ms.totalVol -= ms.volSlots[idx]
-		ms.totalCnt -= ms.cntSlots[idx]
-		ms.volSlots[idx] = 0
-		ms.cntSlots[idx] = 0
+	steps := toSec - w.lastSec
+	if steps > s.cfg.WindowSec {
+		steps = s.cfg.WindowSec
 	}
-	ms.lastSec = toSec
+
+	for i := int64(1); i <= steps; i++ {
+		sec := w.lastSec + i
+		idx := sec % s.cfg.WindowSec
+
+		w.totalVol -= w.volSlots[idx]
+		w.totalCnt -= w.cntSlots[idx]
+		w.volSlots[idx] = 0
+		w.cntSlots[idx] = 0
+	}
+
+	w.lastSec = toSec
 }
