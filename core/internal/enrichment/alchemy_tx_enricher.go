@@ -26,9 +26,7 @@ type AlchemyTxEnricher struct {
 	retries         int
 	engine          *processor.Engine
 	stablecoinMints map[string]bool
-	programNames    map[string]string
 	logger          *slog.Logger
-	metricsOnce     sync.Once
 	successCount    int64
 	failureCount    int64
 	timeoutCount    int64
@@ -44,7 +42,6 @@ type AlchemyTxEnricherConfig struct {
 	Retries         int
 	Engine          *processor.Engine
 	StablecoinMints map[string]bool
-	ProgramNames    map[string]string
 	Logger          *slog.Logger
 }
 
@@ -65,9 +62,6 @@ func NewAlchemyTxEnricher(cfg AlchemyTxEnricherConfig) *AlchemyTxEnricher {
 	if cfg.StablecoinMints == nil {
 		cfg.StablecoinMints = make(map[string]bool)
 	}
-	if cfg.ProgramNames == nil {
-		cfg.ProgramNames = make(map[string]string)
-	}
 
 	return &AlchemyTxEnricher{
 		rpcURL:          cfg.RPCURL,
@@ -76,7 +70,6 @@ func NewAlchemyTxEnricher(cfg AlchemyTxEnricherConfig) *AlchemyTxEnricher {
 		retries:         cfg.Retries,
 		engine:          cfg.Engine,
 		stablecoinMints: cfg.StablecoinMints,
-		programNames:    cfg.ProgramNames,
 		logger:          cfg.Logger,
 		httpClient: &http.Client{
 			Timeout: cfg.RequestTimeout,
@@ -89,10 +82,10 @@ func (ate *AlchemyTxEnricher) EnrichLoop(ctx context.Context, taskChan <-chan ws
 	var wg sync.WaitGroup
 	for i := 0; i < ate.maxWorkers; i++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func() {
 			defer wg.Done()
-			ate.worker(ctx, workerID, taskChan)
-		}(i)
+			ate.worker(ctx, taskChan)
+		}()
 	}
 
 	wg.Wait()
@@ -100,7 +93,7 @@ func (ate *AlchemyTxEnricher) EnrichLoop(ctx context.Context, taskChan <-chan ws
 }
 
 // worker processes enrichment tasks
-func (ate *AlchemyTxEnricher) worker(ctx context.Context, workerID int, taskChan <-chan ws.EnrichmentTask) {
+func (ate *AlchemyTxEnricher) worker(ctx context.Context, taskChan <-chan ws.EnrichmentTask) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -138,7 +131,7 @@ func (ate *AlchemyTxEnricher) processTask(ctx context.Context, task ws.Enrichmen
 	}
 
 	// Extract swap info from token balance deltas
-	swapInfo := ate.extractSwapInfo(task.Signature, txResp.Meta, txResp.Transaction)
+	swapInfo := ate.extractSwapInfo(task.Signature, txResp.Meta)
 	if swapInfo == nil {
 		atomic.AddInt64(&ate.failureCount, 1)
 		return
@@ -242,7 +235,7 @@ func (ate *AlchemyTxEnricher) getTransaction(ctx context.Context, signature stri
 
 // extractSwapInfo extracts swap info from transaction metadata
 // Uses token balance deltas to identify swapper and output mint/amount
-func (ate *AlchemyTxEnricher) extractSwapInfo(signature string, meta *ws.TransactionMeta, tx *ws.FullTransaction) *detector.SwapInfo {
+func (ate *AlchemyTxEnricher) extractSwapInfo(signature string, meta *ws.TransactionMeta) *detector.SwapInfo {
 	if meta == nil || len(meta.PreTokenBalances) == 0 {
 		return nil
 	}

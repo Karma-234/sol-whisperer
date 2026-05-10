@@ -145,13 +145,13 @@ func (ac *AlchemyClient) Subscribe(programID string) error {
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
-		Method:  "programSubscribe",
-		Params: []interface{}{
-			programID,
-			map[string]interface{}{
-				"encoding":                       "jsonParsed",
-				"commitment":                     "processed",
-				"maxSupportedTransactionVersion": 0,
+		Method:  "logsSubscribe",
+		Params: []any{
+			map[string]any{
+				"mentions": []string{programID},
+			},
+			map[string]any{
+				"commitment": "processed",
 			},
 		},
 	}

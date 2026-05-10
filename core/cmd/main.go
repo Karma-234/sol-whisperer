@@ -132,7 +132,6 @@ func main() {
 				Retries:         3,
 				Engine:          engine,
 				StablecoinMints: core.StablecoinMints,
-				ProgramNames:    core.ProgramNames,
 				Logger:          slog.Default(),
 			})
 
