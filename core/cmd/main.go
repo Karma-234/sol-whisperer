@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -84,8 +85,21 @@ func main() {
 	// Optional: Alchemy WebSocket ingestion
 	alchemyWSURL := os.Getenv("ALCHEMY_WS_URL")
 	alchemyRPCURL := os.Getenv("ALCHEMY_RPC_URL")
-	if alchemyWSURL != "" && alchemyRPCURL != "" {
-		if parsedWSURL, err := url.Parse(alchemyWSURL); err != nil {
+	effectiveAlchemyWSURL := alchemyWSURL
+	if alchemyRPCURL != "" {
+		if derivedWSURL, err := deriveWSURLFromRPC(alchemyRPCURL); err != nil {
+			slog.Warn("Unable to derive Alchemy WS URL from RPC URL", slog.String("error", err.Error()))
+		} else if alchemyWSURL == "" {
+			effectiveAlchemyWSURL = derivedWSURL
+			slog.Info("Derived Alchemy WS URL from RPC URL")
+		} else if !sameEndpoint(alchemyWSURL, derivedWSURL) {
+			effectiveAlchemyWSURL = derivedWSURL
+			slog.Warn("ALCHEMY_WS_URL differs from RPC-derived endpoint; using RPC-derived endpoint")
+		}
+	}
+
+	if effectiveAlchemyWSURL != "" && alchemyRPCURL != "" {
+		if parsedWSURL, err := url.Parse(effectiveAlchemyWSURL); err != nil {
 			slog.Warn("Unable to parse Alchemy WS URL", slog.String("error", err.Error()))
 		} else {
 			slog.Info("Resolved Alchemy WS endpoint",
@@ -103,7 +117,7 @@ func main() {
 
 		// Create WebSocket client
 		alchemyClient := ws.NewAlchemyClient(ws.AlchemyClientConfig{
-			WSURL:                   alchemyWSURL,
+			WSURL:                   effectiveAlchemyWSURL,
 			RequestTimeout:          5 * time.Second,
 			ReconnectMinBackoff:     100 * time.Millisecond,
 			ReconnectMaxBackoff:     30 * time.Second,
@@ -203,4 +217,40 @@ func main() {
 	if err := app.Shutdown(); err != nil {
 		slog.Error("Server shutdown error", slog.String("error", err.Error()))
 	}
+}
+
+func deriveWSURLFromRPC(rpcURL string) (string, error) {
+	u, err := url.Parse(rpcURL)
+	if err != nil {
+		return "", err
+	}
+
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		u.Scheme = "wss"
+	case "http":
+		u.Scheme = "ws"
+	case "wss", "ws":
+		// Keep as-is
+	default:
+		return "", &url.Error{Op: "parse", URL: rpcURL, Err: errUnsupportedURLScheme(u.Scheme)}
+	}
+
+	return u.String(), nil
+}
+
+func sameEndpoint(a, b string) bool {
+	au, errA := url.Parse(a)
+	bu, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+
+	return strings.EqualFold(au.Host, bu.Host) && au.EscapedPath() == bu.EscapedPath()
+}
+
+type errUnsupportedURLScheme string
+
+func (e errUnsupportedURLScheme) Error() string {
+	return "unsupported URL scheme: " + string(e)
 }
