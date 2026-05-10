@@ -2,7 +2,11 @@ module github.com/karma-234/sol-whisperer
 
 go 1.25.0
 
-require github.com/gofiber/fiber/v2 v2.52.13
+require (
+	github.com/gofiber/fiber/v2 v2.52.13
+	github.com/gorilla/websocket v1.5.3
+	golang.org/x/sync v0.20.0
+)
 
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
