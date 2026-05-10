@@ -134,6 +134,9 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 	if len(swap.TokenOutputs) > 0 {
 		out := pickOutputForSwapper(swap.TokenOutputs, info.Swapper)
 		info.OutputMint = out.Mint
+		if core.StablecoinMints[info.OutputMint] {
+			return nil
+		}
 		info.OutputAmount = out.RawTokenAmount.TokenAmount
 		info.OutputDecimals = out.RawTokenAmount.Decimals
 		if info.Swapper == "" && out.UserAccount != "" {

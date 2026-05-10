@@ -9,3 +9,12 @@ var ProgramNames = map[string]string{
 	"BSwp6bEBihVLdqJRKGgzjcGLHkcTuzmSo1TQkHepzH8p": "bonkswap",
 	"FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1": "letsbonk",
 }
+
+var StablecoinMints = map[string]bool{
+	"EPjFWaJy47gMn9TEWjDHw4rjBQyWwjknz7zksf8r2D4Y": true, // USDC
+	"Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenErt9": true, // USDT
+	"AKEWE7Bgh387DewKXGZDjngSvoyM1E6LUe6wqSstmnmY": true, // USDH
+	"7vfCXTUNVrCkW8K2Rgk76R8SR3WBZkKAm6nPJKJpVXS":  true, // dUSDC
+	"HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQAC1":  true, // COPE
+	"4k3Dyjzvzp8eMZWUUbCz3rGVd5MagE5jz4XLK3JKuQAe": true, // Magic Eden SOL
+}
