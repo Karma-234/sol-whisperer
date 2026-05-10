@@ -93,8 +93,7 @@ func main() {
 			effectiveAlchemyWSURL = derivedWSURL
 			slog.Info("Derived Alchemy WS URL from RPC URL")
 		} else if !sameEndpoint(alchemyWSURL, derivedWSURL) {
-			effectiveAlchemyWSURL = derivedWSURL
-			slog.Warn("ALCHEMY_WS_URL differs from RPC-derived endpoint; using RPC-derived endpoint")
+			slog.Warn("ALCHEMY_WS_URL differs from RPC-derived endpoint; using configured ALCHEMY_WS_URL")
 		}
 	}
 

@@ -2,11 +2,14 @@ package ws
 
 import (
 	"context"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -109,9 +112,21 @@ func (ac *AlchemyClient) Connect(ctx context.Context) error {
 		ac.logger.Warn("alchemy websocket host does not look like a Solana endpoint", slog.String("host", u.Host))
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), nil)
+	dialer := *websocket.DefaultDialer
+	conn, resp, err := dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
-		ac.logger.Error("failed to connect to WebSocket", slog.String("error", err.Error()))
+		logAttrs := []any{slog.String("error", err.Error())}
+		if resp != nil {
+			logAttrs = append(logAttrs,
+				slog.Int("status_code", resp.StatusCode),
+				slog.String("status", resp.Status),
+				slog.String("server", resp.Header.Get("Server")),
+			)
+			if body, readErr := readBodyPreview(resp, 512); readErr == nil && body != "" {
+				logAttrs = append(logAttrs, slog.String("response_body_preview", body))
+			}
+		}
+		ac.logger.Error("failed to connect to WebSocket", logAttrs...)
 		return fmt.Errorf("dial ws: %w", err)
 	}
 
@@ -369,4 +384,20 @@ func (ac *AlchemyClient) exponentialBackoff(attempt int) time.Duration {
 	jitterAmount := expBackoff * 0.1
 	jitter := (rand.Float64() - 0.5) * 2 * jitterAmount
 	return time.Duration((expBackoff+jitter)*1000) * time.Millisecond
+}
+
+func readBodyPreview(resp *http.Response, maxBytes int64) (string, error) {
+	if resp == nil || resp.Body == nil || maxBytes <= 0 {
+		return "", nil
+	}
+	defer resp.Body.Close()
+
+	limited := io.LimitReader(resp.Body, maxBytes)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return "", err
+	}
+
+	body = bytes.TrimSpace(body)
+	return string(body), nil
 }

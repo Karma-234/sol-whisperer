@@ -5,6 +5,8 @@
 /bin/
 /build/
 /dist/
+main
+cmd
 
 # Ignore IDE and editor files
 /.idea/
