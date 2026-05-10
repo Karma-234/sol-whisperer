@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -103,6 +104,9 @@ func (ac *AlchemyClient) Connect(ctx context.Context) error {
 	if err != nil {
 		ac.logger.Error("failed to parse WebSocket URL", slog.String("error", err.Error()))
 		return fmt.Errorf("parse ws url: %w", err)
+	}
+	if strings.Contains(u.Host, "alchemy.com") && !strings.Contains(u.Host, "solana-") {
+		ac.logger.Warn("alchemy websocket host does not look like a Solana endpoint", slog.String("host", u.Host))
 	}
 
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, u.String(), nil)
@@ -219,8 +223,8 @@ func (ac *AlchemyClient) ReadLoop(ctx context.Context) {
 			}
 
 			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			var msg []byte
-			if err := conn.ReadJSON(&msg); err != nil {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
 				ac.connMu.Lock()
 				if ac.conn == conn {
 					ac.conn = nil

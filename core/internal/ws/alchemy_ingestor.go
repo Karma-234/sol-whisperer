@@ -152,25 +152,30 @@ func (i *Ingestor) Close() error {
 // ProcessNotification processes a single notification from the WebSocket
 // Returns a SwapInfo if successfully parsed and not a duplicate, or nil otherwise
 func (i *Ingestor) ProcessNotification(notif *ProgramNotification) *EnrichmentTask {
-	if notif == nil || notif.Result == nil || notif.Result.Value == nil {
+	if notif == nil || notif.Params == nil || notif.Params.Result == nil || notif.Params.Result.Value == nil {
 		return nil
 	}
 
-	value := notif.Result.Value
+	value := notif.Params.Result.Value
 	if value.Signature == "" {
 		return nil
 	}
 
 	// Check for duplicates
 	if i.dedupCache.IsDuplicate(value.Signature) {
-		i.queueDropCount++
+		i.dedupDropCount++
 		return nil
+	}
+
+	var slot uint64
+	if notif.Params.Result.Context != nil {
+		slot = notif.Params.Result.Context.Slot
 	}
 
 	// Create enrichment task
 	task := EnrichmentTask{
 		Signature: value.Signature,
-		Slot:      value.Slot,
+		Slot:      slot,
 		Timestamp: time.Now(),
 	}
 

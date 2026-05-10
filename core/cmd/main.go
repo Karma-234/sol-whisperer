@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -84,7 +85,14 @@ func main() {
 	alchemyWSURL := os.Getenv("ALCHEMY_WS_URL")
 	alchemyRPCURL := os.Getenv("ALCHEMY_RPC_URL")
 	if alchemyWSURL != "" && alchemyRPCURL != "" {
-		slog.Info("Initializing Alchemy WebSocket ingestion", slog.String("ws_url", alchemyWSURL))
+		if parsedWSURL, err := url.Parse(alchemyWSURL); err != nil {
+			slog.Warn("Unable to parse Alchemy WS URL", slog.String("error", err.Error()))
+		} else {
+			slog.Info("Resolved Alchemy WS endpoint",
+				slog.String("scheme", parsedWSURL.Scheme),
+				slog.String("host", parsedWSURL.Host))
+		}
+		slog.Info("Initializing Alchemy WebSocket ingestion")
 
 		// Initialize errgroup for Alchemy components
 		eg, egCtx = errgroup.WithContext(context.Background())

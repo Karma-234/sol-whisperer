@@ -1,21 +1,21 @@
 package ws
 
-// Solana JSON-RPC types for programSubscribe notifications
+// Solana JSON-RPC types for logsSubscribe notifications
 
 // JSONRPCRequest is a JSON-RPC 2.0 request
 type JSONRPCRequest struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      int           `json:"id"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Params  []any  `json:"params"`
 }
 
 // JSONRPCResponse is a JSON-RPC 2.0 response
 type JSONRPCResponse struct {
 	JSONRPC string        `json:"jsonrpc"`
-	Result  interface{}   `json:"result,omitempty"`
+	Result  any           `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
-	ID      interface{}   `json:"id"`
+	ID      any           `json:"id"`
 }
 
 // JSONRPCError is a JSON-RPC error object
@@ -25,23 +25,29 @@ type JSONRPCError struct {
 	Data    string `json:"data,omitempty"`
 }
 
-// ProgramNotification is a programSubscribe notification from Solana
+// ProgramNotification is a logsSubscribe notification from Solana
 type ProgramNotification struct {
-	Result *ProgramNotificationResult `json:"result,omitempty"`
-	Error  *JSONRPCError              `json:"error,omitempty"`
+	JSONRPC string                     `json:"jsonrpc"`
+	Method  string                     `json:"method,omitempty"`
+	Params  *ProgramNotificationParams `json:"params,omitempty"`
+	Error   *JSONRPCError              `json:"error,omitempty"`
 }
 
-// ProgramNotificationResult contains the subscription result or update
+// ProgramNotificationParams wraps logsNotification params.
+type ProgramNotificationParams struct {
+	Result       *ProgramNotificationResult `json:"result,omitempty"`
+	Subscription int                        `json:"subscription"`
+}
+
+// ProgramNotificationResult contains context and value for logsNotification.
 type ProgramNotificationResult struct {
-	Subscription int                       `json:"subscription"`
-	Value        *ProgramNotificationValue `json:"value,omitempty"`
+	Context *RpcContext               `json:"context,omitempty"`
+	Value   *ProgramNotificationValue `json:"value,omitempty"`
 }
 
-// ProgramNotificationValue is the transaction data in a programSubscribe notification
+// ProgramNotificationValue is the transaction data in a logsNotification update.
 type ProgramNotificationValue struct {
 	Signature   string           `json:"signature"`
-	Slot        uint64           `json:"slot"`
-	Context     *RpcContext      `json:"context,omitempty"`
 	Logs        []string         `json:"logs,omitempty"`
 	Err         interface{}      `json:"err,omitempty"`
 	Transaction *TransactionData `json:"transaction,omitempty"`
@@ -131,6 +137,6 @@ type UiTokenAmount struct {
 
 // TransactionStatus is the transaction status
 type TransactionStatus struct {
-	Ok  interface{} `json:"Ok,omitempty"`
-	Err interface{} `json:"Err,omitempty"`
+	Ok  any `json:"Ok,omitempty"`
+	Err any `json:"Err,omitempty"`
 }
