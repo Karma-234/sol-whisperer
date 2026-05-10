@@ -34,8 +34,20 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
+		slog.Info("Server is starting on port 8080")
 		if err := app.Listen(":8080"); err != nil {
 			slog.Info("Server encountered an error", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	}()
+
+	pprofApp := fiber.New()
+	pprofApp.Get("/debug/pprof/*", func(c *fiber.Ctx) error {
+		return nil
+	})
+	go func() {
+		if err := pprofApp.Listen(":6060"); err != nil {
+			slog.Info("Pprof server encountered an error", slog.String("error", err.Error()))
 			os.Exit(1)
 		}
 	}()
