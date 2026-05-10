@@ -43,6 +43,7 @@ jobs:
               --name sol-whisperer \
               --restart always \
               -p 8080:8080 \
+              -p 127.0.0.1:6060:6060 \
               --env-file /etc/environment \
               sol-whisperer
             rm /home/ec2-user/sol-whisperer.tar.gz

@@ -2,6 +2,8 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -41,12 +43,22 @@ func main() {
 		}
 	}()
 
-	pprofApp := fiber.New()
-	pprofApp.Get("/debug/pprof/*", func(c *fiber.Ctx) error {
-		return nil
-	})
+	// Real pprof server on :6060
+	pprofMux := http.NewServeMux()
+	pprofMux.HandleFunc("/debug/pprof/", pprof.Index)
+	pprofMux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	pprofMux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	pprofMux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	pprofMux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	pprofMux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+	pprofMux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+	pprofMux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+	pprofMux.Handle("/debug/pprof/block", pprof.Handler("block"))
+	pprofMux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+
 	go func() {
-		if err := pprofApp.Listen(":6060"); err != nil {
+		slog.Info("Pprof server is starting on port 6060")
+		if err := http.ListenAndServe(":6060", pprofMux); err != nil {
 			slog.Info("Pprof server encountered an error", slog.String("error", err.Error()))
 			os.Exit(1)
 		}
