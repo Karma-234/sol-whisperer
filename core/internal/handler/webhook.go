@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/karma-234/sol-whisperer/core/internal/detector"
 	"github.com/karma-234/sol-whisperer/core/internal/types"
 )
 
@@ -16,7 +17,9 @@ func WebHookHandler(c *fiber.Ctx) error {
 		return c.Status(400).SendString("Invalid payload")
 	}
 	go func() {
-
+		for _, tx := range payload {
+			_ = detector.ExtractSwapInfo(tx)
+		}
 	}()
 	return c.SendStatus(200)
 }
