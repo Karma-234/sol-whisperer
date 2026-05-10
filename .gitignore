@@ -26,3 +26,4 @@ Thumbs.db
 
 # Ignore script files
 *.sh
+*.pem

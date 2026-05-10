@@ -1,0 +1,76 @@
+# === Sensitive / Secret files ===
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+credentials.json
+service-account.json
+
+# === Git & Version Control ===
+.git
+.gitignore
+.gitattributes
+
+# === Build artifacts & caches ===
+**/target/
+**/bin/
+**/obj/
+**/build/
+**/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# === Go specific ===
+go.sum.bak
+vendor/                  
+*.test
+*.prof
+
+# === Logs & temporary files ===
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# === Development & testing ===
+.dockerignore
+README.md
+LICENSE
+*.md
+test/
+tests/
+**/testdata/
+**/mocks/
+coverage.out
+coverage.html
+Makefile
+# *.sh
+# scripts/
+
+# === IDE / Editor files ===
+.vscode/
+.idea/
+.qodo/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# === Docker related (avoid sending Docker files into image) ===
+Dockerfile
+.dockerignore
+docker-compose.yml
+stack.yml
+
+
+# === Large files you don't need in image ===
+*.mp4
+*.mov
+*.pdf
+*.zip
