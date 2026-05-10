@@ -5,6 +5,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"io"
+	"log/slog"
 	"math"
 	"runtime"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/karma-234/sol-whisperer/core/internal/detector"
+	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 )
 
 var ErrShardQueueFull = errors.New("shard queue full")
@@ -27,6 +29,7 @@ type Event struct {
 
 type Alert struct {
 	Mint         string
+	TokenName    string
 	Swapper      string
 	Signature    string
 	Source       string
@@ -64,10 +67,11 @@ type Config struct {
 }
 
 type Engine struct {
-	cfg    Config
-	shards []chan Event
-	alerts chan Alert
-	sink   AlertSink
+	cfg             Config
+	shards          []chan Event
+	alerts          chan Alert
+	sink            AlertSink
+	metadataFetcher *metadata.Fetcher
 
 	enqueued     uint64
 	dropped      uint64
@@ -77,7 +81,7 @@ type Engine struct {
 	alertSent    uint64
 }
 
-func New(cfg Config, sink AlertSink) *Engine {
+func New(cfg Config, sink AlertSink, fetcher *metadata.Fetcher) *Engine {
 	if cfg.Shards <= 0 {
 		cfg.Shards = max(2*runtime.NumCPU(), 16)
 	}
@@ -101,10 +105,11 @@ func New(cfg Config, sink AlertSink) *Engine {
 	}
 
 	e := &Engine{
-		cfg:    cfg,
-		shards: make([]chan Event, cfg.Shards),
-		alerts: make(chan Alert, cfg.AlertQueue),
-		sink:   sink,
+		cfg:             cfg,
+		shards:          make([]chan Event, cfg.Shards),
+		alerts:          make(chan Alert, cfg.AlertQueue),
+		sink:            sink,
+		metadataFetcher: fetcher,
 	}
 
 	for i := 0; i < cfg.Shards; i++ {
@@ -186,11 +191,20 @@ func (e *Engine) enqueueAlert(alert Alert) {
 
 func (e *Engine) runAlertWorker() {
 	for alert := range e.alerts {
+		// Fetch token metadata asynchronously (non-blocking lookup)
+		if e.metadataFetcher != nil {
+			if meta := e.metadataFetcher.FetchTokenMetadata(alert.Mint); meta != nil {
+				alert.TokenName = meta.Symbol
+			}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err := e.sink.Send(ctx, alert)
 		cancel()
 		if err == nil {
 			atomic.AddUint64(&e.alertSent, 1)
+		} else {
+			slog.Debug("Failed to send alert", slog.String("error", err.Error()), slog.String("mint", alert.Mint))
 		}
 	}
 }
