@@ -8,9 +8,20 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/karma-234/sol-whisperer/core/internal/handler"
+	"github.com/karma-234/sol-whisperer/core/internal/processor"
 )
 
 func main() {
+	engine := processor.New(processor.Config{
+		Shards:        16,
+		QueuePerShard: 2048,
+		WindowSec:     60,
+		MinVolumeRaw:  1_000_000_000,
+		MinTrades:     8,
+		SpikeMultiple: 3.0,
+		EWMAAlpha:     0.2,
+	})
+	handler := handler.NewWebhookHandler(os.Getenv("WEBHOOK_SECRET"), engine)
 	app := fiber.New()
 	app.Post("/webhook", handler.WebHookHandler)
 
