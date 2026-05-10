@@ -86,13 +86,16 @@ func main() {
 	alchemyWSURL := os.Getenv("ALCHEMY_WS_URL")
 	alchemyRPCURL := os.Getenv("ALCHEMY_RPC_URL")
 	effectiveAlchemyWSURL := alchemyWSURL
+	derivedWSURL := ""
 	if alchemyRPCURL != "" {
-		if derivedWSURL, err := deriveWSURLFromRPC(alchemyRPCURL); err != nil {
+		if candidateWSURL, err := deriveWSURLFromRPC(alchemyRPCURL); err != nil {
 			slog.Warn("Unable to derive Alchemy WS URL from RPC URL", slog.String("error", err.Error()))
 		} else if alchemyWSURL == "" {
-			effectiveAlchemyWSURL = derivedWSURL
+			derivedWSURL = candidateWSURL
+			effectiveAlchemyWSURL = candidateWSURL
 			slog.Info("Derived Alchemy WS URL from RPC URL")
-		} else if !sameEndpoint(alchemyWSURL, derivedWSURL) {
+		} else if !sameEndpoint(alchemyWSURL, candidateWSURL) {
+			derivedWSURL = candidateWSURL
 			slog.Warn("ALCHEMY_WS_URL differs from RPC-derived endpoint; using configured ALCHEMY_WS_URL")
 		}
 	}
@@ -134,63 +137,100 @@ func main() {
 		} else {
 			cancel()
 
-			// Create ingestor
-			ingestor := ws.NewIngestor(ws.IngestorConfig{
-				AlchemyClient:       alchemyClient,
-				DedupMaxSize:        10000,
-				DedupTTL:            2 * time.Hour,
-				EnrichmentQueueSize: 2048,
-				StablecoinMints:     core.StablecoinMints,
-				DEXPrograms:         dexPrograms,
-				Logger:              slog.Default(),
-			})
+			if err := alchemyClient.VerifySolanaRPC(); err != nil {
+				slog.Warn("Configured Alchemy WS endpoint failed Solana probe", slog.String("error", err.Error()))
+				if derivedWSURL != "" && !sameEndpoint(effectiveAlchemyWSURL, derivedWSURL) {
+					slog.Warn("Retrying Alchemy WS with RPC-derived endpoint")
+					_ = alchemyClient.Disconnect()
+					alchemyClient = ws.NewAlchemyClient(ws.AlchemyClientConfig{
+						WSURL:                   derivedWSURL,
+						RequestTimeout:          5 * time.Second,
+						ReconnectMinBackoff:     100 * time.Millisecond,
+						ReconnectMaxBackoff:     30 * time.Second,
+						CircuitBreakerThreshold: 10,
+						CircuitBreakerTimeout:   5 * time.Minute,
+						NotificationBufferSize:  1024,
+						Logger:                  slog.Default(),
+					})
 
-			// Create enricher
-			enricher := enrichment.NewAlchemyTxEnricher(enrichment.AlchemyTxEnricherConfig{
-				RPCURL:          alchemyRPCURL,
-				MaxWorkers:      5,
-				RequestTimeout:  5 * time.Second,
-				Retries:         3,
-				Engine:          engine,
-				StablecoinMints: core.StablecoinMints,
-				Logger:          slog.Default(),
-			})
-
-			// Start ingestion goroutine
-			ingestCtx, ingestCancel := context.WithCancel(egCtx)
-			cancelFuncs = append(cancelFuncs, ingestCancel)
-			eg.Go(func() error {
-				slog.Info("Starting Alchemy ingest loop")
-				return ingestor.IngestLoop(ingestCtx)
-			})
-
-			// Start enrichment workers
-			enrichCtx, enrichCancel := context.WithCancel(egCtx)
-			cancelFuncs = append(cancelFuncs, enrichCancel)
-			eg.Go(func() error {
-				slog.Info("Starting Alchemy enrichment workers", slog.Int("workers", 5))
-				return enricher.EnrichLoop(enrichCtx, ingestor.EnrichmentChan())
-			})
-
-			// Periodically log metrics
-			metricsCtx, metricsCancel := context.WithCancel(egCtx)
-			cancelFuncs = append(cancelFuncs, metricsCancel)
-			eg.Go(func() error {
-				ticker := time.NewTicker(30 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-metricsCtx.Done():
-						return metricsCtx.Err()
-					case <-ticker.C:
-						ingestMetrics := ingestor.Metrics()
-						enrichMetrics := enricher.Metrics()
-						slog.Info("Alchemy metrics",
-							slog.Any("ingest", ingestMetrics),
-							slog.Any("enrich", enrichMetrics))
+					ctxRetry, cancelRetry := context.WithTimeout(context.Background(), 30*time.Second)
+					if err := alchemyClient.Connect(ctxRetry); err != nil {
+						slog.Error("Failed to connect to RPC-derived Alchemy WebSocket", slog.String("error", err.Error()))
+						cancelRetry()
+					} else {
+						cancelRetry()
+						if err := alchemyClient.VerifySolanaRPC(); err != nil {
+							slog.Error("RPC-derived Alchemy WS endpoint failed Solana probe", slog.String("error", err.Error()))
+						} else {
+							effectiveAlchemyWSURL = derivedWSURL
+							slog.Info("Using RPC-derived Alchemy WS endpoint after successful probe")
+						}
 					}
 				}
-			})
+			}
+
+			if !alchemyClient.IsConnected() {
+				slog.Error("Alchemy WebSocket unavailable after probe/fallback")
+			} else {
+
+				// Create ingestor
+				ingestor := ws.NewIngestor(ws.IngestorConfig{
+					AlchemyClient:       alchemyClient,
+					DedupMaxSize:        10000,
+					DedupTTL:            2 * time.Hour,
+					EnrichmentQueueSize: 2048,
+					StablecoinMints:     core.StablecoinMints,
+					DEXPrograms:         dexPrograms,
+					Logger:              slog.Default(),
+				})
+
+				// Create enricher
+				enricher := enrichment.NewAlchemyTxEnricher(enrichment.AlchemyTxEnricherConfig{
+					RPCURL:          alchemyRPCURL,
+					MaxWorkers:      5,
+					RequestTimeout:  5 * time.Second,
+					Retries:         3,
+					Engine:          engine,
+					StablecoinMints: core.StablecoinMints,
+					Logger:          slog.Default(),
+				})
+
+				// Start ingestion goroutine
+				ingestCtx, ingestCancel := context.WithCancel(egCtx)
+				cancelFuncs = append(cancelFuncs, ingestCancel)
+				eg.Go(func() error {
+					slog.Info("Starting Alchemy ingest loop")
+					return ingestor.IngestLoop(ingestCtx)
+				})
+
+				// Start enrichment workers
+				enrichCtx, enrichCancel := context.WithCancel(egCtx)
+				cancelFuncs = append(cancelFuncs, enrichCancel)
+				eg.Go(func() error {
+					slog.Info("Starting Alchemy enrichment workers", slog.Int("workers", 5))
+					return enricher.EnrichLoop(enrichCtx, ingestor.EnrichmentChan())
+				})
+
+				// Periodically log metrics
+				metricsCtx, metricsCancel := context.WithCancel(egCtx)
+				cancelFuncs = append(cancelFuncs, metricsCancel)
+				eg.Go(func() error {
+					ticker := time.NewTicker(30 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-metricsCtx.Done():
+							return metricsCtx.Err()
+						case <-ticker.C:
+							ingestMetrics := ingestor.Metrics()
+							enrichMetrics := enricher.Metrics()
+							slog.Info("Alchemy metrics",
+								slog.Any("ingest", ingestMetrics),
+								slog.Any("enrich", enrichMetrics))
+						}
+					}
+				})
+			}
 		}
 	} else {
 		slog.Info("Alchemy WebSocket not configured (ALCHEMY_WS_URL or ALCHEMY_RPC_URL not set)")

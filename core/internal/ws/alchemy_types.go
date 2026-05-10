@@ -22,7 +22,7 @@ type JSONRPCResponse struct {
 type JSONRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-	Data    string `json:"data,omitempty"`
+	Data    any    `json:"data,omitempty"`
 }
 
 // ProgramNotification is a logsSubscribe notification from Solana
@@ -49,7 +49,7 @@ type ProgramNotificationResult struct {
 type ProgramNotificationValue struct {
 	Signature   string           `json:"signature"`
 	Logs        []string         `json:"logs,omitempty"`
-	Err         interface{}      `json:"err,omitempty"`
+	Err         any              `json:"err,omitempty"`
 	Transaction *TransactionData `json:"transaction,omitempty"`
 }
 

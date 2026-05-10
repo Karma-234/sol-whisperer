@@ -1,8 +1,8 @@
 package ws
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -186,7 +186,10 @@ func (ac *AlchemyClient) Subscribe(programID string) error {
 	}
 
 	if resp.Error != nil {
-		return fmt.Errorf("subscription error: %s", resp.Error.Message)
+		if strings.Contains(strings.ToLower(resp.Error.Message), "method 'logssubscribe' not found") {
+			return fmt.Errorf("subscription error: %s (code=%d, data=%v). endpoint is likely not Solana PubSub; verify ALCHEMY_WS_URL uses a Solana app/key", resp.Error.Message, resp.Error.Code, resp.Error.Data)
+		}
+		return fmt.Errorf("subscription error: %s (code=%d, data=%v)", resp.Error.Message, resp.Error.Code, resp.Error.Data)
 	}
 
 	// Extract subscription ID from result (should be a float64)
@@ -200,6 +203,37 @@ func (ac *AlchemyClient) Subscribe(programID string) error {
 	ac.subscriptionMu.Unlock()
 
 	ac.logger.Info("subscribed to program", slog.String("program_id", programID), slog.Int("subscription_id", int(subID)))
+	return nil
+}
+
+// VerifySolanaRPC verifies that the connected websocket endpoint supports Solana JSON-RPC methods.
+func (ac *AlchemyClient) VerifySolanaRPC() error {
+	id := ac.getNextID()
+	req := JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      id,
+		Method:  "getVersion",
+		Params:  []any{},
+	}
+
+	if err := ac.sendRequest(req); err != nil {
+		return fmt.Errorf("send getVersion probe: %w", err)
+	}
+
+	resp, err := ac.readResponse()
+	if err != nil {
+		return fmt.Errorf("read getVersion probe response: %w", err)
+	}
+
+	if resp.Error != nil {
+		return fmt.Errorf("getVersion probe failed: %s (code=%d, data=%v)", resp.Error.Message, resp.Error.Code, resp.Error.Data)
+	}
+
+	if _, ok := resp.Result.(map[string]any); !ok {
+		ac.logger.Warn("getVersion probe returned non-object result", slog.Any("result", resp.Result))
+	}
+
+	ac.logger.Info("Solana RPC capability probe succeeded")
 	return nil
 }
 
