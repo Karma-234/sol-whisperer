@@ -22,7 +22,7 @@ func NewWebhookHandler(secret string, engine *processor.Engine) *WebhookHandler 
 }
 
 func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
-	if auth := c.Get("Authorization"); auth != "Bearer "+h.secret {
+	if auth := c.Get("Authorization"); auth != h.secret && auth != "Bearer "+h.secret {
 		return c.Status(401).SendString("Unauthorized")
 	}
 	var payload types.HeliusEnhancedWebhookPayload
