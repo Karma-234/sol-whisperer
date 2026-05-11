@@ -33,7 +33,7 @@ func main() {
 
 	// Initialize market cap filter from environment variable
 	maxCapStr := os.Getenv("MAX_MARKET_CAP_USD")
-	maxCap := uint64(50_000) // default: $50K
+	maxCap := uint64(200_000) // default: $200K
 	if maxCapStr != "" {
 		if cap, err := strconv.ParseUint(maxCapStr, 10, 64); err == nil {
 			maxCap = cap

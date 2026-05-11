@@ -173,8 +173,8 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 		}
 	}
 
-	// Skip if input volume is too small (minimum 5 SOL when buying with SOL)
-	const minInputSOL = 5e9 // 5 SOL in lamports
+	// Skip if input volume is too small (minimum 0.3 SOL when buying with SOL)
+	const minInputSOL = 3e8 // 0.3 SOL in lamports
 	if info.AmountInSOL > 0 && info.AmountInSOL < minInputSOL {
 		return nil
 	}
