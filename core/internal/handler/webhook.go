@@ -47,10 +47,12 @@ func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 		if err := h.engine.IngestSwapInfo(info); err != nil {
 			if errors.Is(err, processor.ErrShardQueueFull) {
 				slog.Warn("webhook_ingest_queue_full", slog.String("signature", info.Signature))
-				return c.Status(503).SendString("Queue full")
+				// return c.Status(503).SendString("Queue full")
+				continue
 			}
 			slog.Warn("webhook_ingest_failed", slog.String("signature", info.Signature), slog.String("error", err.Error()))
-			return c.Status(500).SendString("Processing failed")
+			continue
+			// return c.Status(500).SendString("Processing failed")
 		}
 		acceptedCount++
 	}
