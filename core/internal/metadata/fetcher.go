@@ -71,8 +71,8 @@ func (f *Fetcher) StartAutoRefresh() {
 	slog.Info("Jupiter auto-refresh disabled; metadata fetched on-demand")
 }
 
-// FetchTokenMetadata returns cached metadata or nil if not found (non-blocking hot path).
-// Misses are fetched async from Jupiter Tokens V2 first, then DexScreener fallback.
+// FetchTokenMetadata returns cached metadata or fetches from Jupiter Tokens V2 with timeout.
+// Blocks up to 2 seconds for Jupiter search; DexScreener lookup continues async for cache population.
 func (f *Fetcher) FetchTokenMetadata(mint string) *TokenMetadata {
 	// Check Jupiter cache (read-only, no lock)
 	if cache := f.jupiterCache.Load(); cache != nil {
@@ -92,8 +92,13 @@ func (f *Fetcher) FetchTokenMetadata(mint string) *TokenMetadata {
 		f.dexCache.Delete(mint)
 	}
 
-	// Spawn async fetches (non-blocking return)
-	go f.fetchFromJupiterSearch(mint)
+	// Blocking Jupiter fetch with timeout (ensures token names are resolved for alerts)
+	meta := f.fetchFromJupiterSearchBlocking(mint)
+	if meta != nil {
+		return meta
+	}
+
+	// Spawn async DexScreener fetch for fallback cache population
 	go f.fetchFromDexScreener(mint)
 
 	return nil
@@ -144,6 +149,49 @@ func (f *Fetcher) fetchFromJupiterSearch(mint string) {
 	f.upsertJupiterCache(resolvedMint, meta)
 
 	slog.Debug("Cached token metadata from Jupiter", slog.String("mint", resolvedMint), slog.String("symbol", meta.Symbol))
+}
+
+// fetchFromJupiterSearchBlocking fetches and returns metadata directly (blocking, ~2s timeout).
+func (f *Fetcher) fetchFromJupiterSearchBlocking(mint string) *TokenMetadata {
+	ctx, cancel := context.WithTimeout(f.ctx, 2*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("https://api.jup.ag/tokens/v2/search?query=%s", mint)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if f.jupiterAPIKey != "" {
+		req.Header.Set("x-api-key", f.jupiterAPIKey)
+	}
+
+	resp, err := f.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil
+	}
+
+	body := io.LimitReader(resp.Body, 128*1024)
+
+	var tokens []struct {
+		ID     string `json:"id"`
+		Symbol string `json:"symbol"`
+		Name   string `json:"name"`
+	}
+
+	if err := json.NewDecoder(body).Decode(&tokens); err != nil {
+		return nil
+	}
+
+	if len(tokens) == 0 || tokens[0].ID == "" {
+		return nil
+	}
+
+	resolvedMint := tokens[0].ID
+	meta := &TokenMetadata{Symbol: tokens[0].Symbol, Name: tokens[0].Name}
+	f.upsertJupiterCache(resolvedMint, meta)
+	return meta
 }
 
 func (f *Fetcher) upsertJupiterCache(mint string, meta *TokenMetadata) {

@@ -79,6 +79,10 @@ func buildMessage(a processor.Alert) string {
 	if a.TokenName != "" {
 		lines = append(lines, "<b>Token:</b> "+escapeHTML(a.TokenName))
 	}
+	if a.AmountInSOL > 0 {
+		solAmount := float64(a.AmountInSOL) / 1e9 // Convert lamports to SOL
+		lines = append(lines, "<b>Amount:</b> "+trimFloat(solAmount)+" SOL")
+	}
 	lines = append(lines, "<b>Mint:</b> "+escapeHTML(a.Mint))
 	lines = append(lines, "<b>Swapper:</b> "+escapeHTML(a.Swapper))
 	lines = append(lines, "<b>Source:</b> "+escapeHTML(a.Source))
