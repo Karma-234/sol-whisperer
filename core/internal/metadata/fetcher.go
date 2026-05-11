@@ -14,8 +14,9 @@ import (
 )
 
 type TokenMetadata struct {
-	Symbol string
-	Name   string
+	Symbol   string
+	Name     string
+	MarketCap uint64 // in USD
 }
 
 type Fetcher struct {
@@ -175,9 +176,10 @@ func (f *Fetcher) fetchFromJupiterSearchBlocking(mint string) *TokenMetadata {
 	body := io.LimitReader(resp.Body, 128*1024)
 
 	var tokens []struct {
-		ID     string `json:"id"`
-		Symbol string `json:"symbol"`
-		Name   string `json:"name"`
+		ID        string `json:"id"`
+		Symbol    string `json:"symbol"`
+		Name      string `json:"name"`
+		MarketCap uint64 `json:"marketCap"`
 	}
 
 	if err := json.NewDecoder(body).Decode(&tokens); err != nil {
@@ -189,7 +191,7 @@ func (f *Fetcher) fetchFromJupiterSearchBlocking(mint string) *TokenMetadata {
 	}
 
 	resolvedMint := tokens[0].ID
-	meta := &TokenMetadata{Symbol: tokens[0].Symbol, Name: tokens[0].Name}
+	meta := &TokenMetadata{Symbol: tokens[0].Symbol, Name: tokens[0].Name, MarketCap: tokens[0].MarketCap}
 	f.upsertJupiterCache(resolvedMint, meta)
 	return meta
 }
@@ -236,9 +238,10 @@ func (f *Fetcher) fetchFromDexScreener(mint string) {
 	var result struct {
 		Pairs []struct {
 			BaseToken struct {
-				Symbol string `json:"symbol"`
-				Name   string `json:"name"`
+				Symbol    string `json:"symbol"`
+				Name      string `json:"name"`
 			} `json:"baseToken"`
+			FDV float64 `json:"fdv"` // fully diluted valuation (market cap proxy)
 		} `json:"pairs"`
 	}
 
@@ -253,8 +256,9 @@ func (f *Fetcher) fetchFromDexScreener(mint string) {
 	}
 
 	meta := &TokenMetadata{
-		Symbol: result.Pairs[0].BaseToken.Symbol,
-		Name:   result.Pairs[0].BaseToken.Name,
+		Symbol:    result.Pairs[0].BaseToken.Symbol,
+		Name:      result.Pairs[0].BaseToken.Name,
+		MarketCap: uint64(result.Pairs[0].FDV),
 	}
 
 	f.dexCache.Store(mint, &cacheEntry{
@@ -262,7 +266,7 @@ func (f *Fetcher) fetchFromDexScreener(mint string) {
 		timestamp: time.Now(),
 	})
 
-	slog.Debug("Cached token metadata from DexScreener", slog.String("mint", mint), slog.String("symbol", meta.Symbol))
+	slog.Debug("Cached token metadata from DexScreener", slog.String("mint", mint), slog.String("symbol", meta.Symbol), slog.Uint64("cap", meta.MarketCap))
 }
 
 // Stop gracefully shuts down the fetcher and background goroutines.

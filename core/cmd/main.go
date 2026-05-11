@@ -7,6 +7,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/karma-234/sol-whisperer/core"
 	"github.com/karma-234/sol-whisperer/core/internal/alert"
 	"github.com/karma-234/sol-whisperer/core/internal/enrichment"
+	"github.com/karma-234/sol-whisperer/core/internal/filter"
 	"github.com/karma-234/sol-whisperer/core/internal/handler"
 	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 	"github.com/karma-234/sol-whisperer/core/internal/processor"
@@ -29,6 +31,19 @@ func main() {
 	}
 	metadataFetcher.StartAutoRefresh()
 
+	// Initialize market cap filter from environment variable
+	maxCapStr := os.Getenv("MAX_MARKET_CAP_USD")
+	maxCap := uint64(50_000) // default: $50K
+	if maxCapStr != "" {
+		if cap, err := strconv.ParseUint(maxCapStr, 10, 64); err == nil {
+			maxCap = cap
+		} else {
+			slog.Warn("Failed to parse MAX_MARKET_CAP_USD, using default", slog.String("error", err.Error()))
+		}
+	}
+	capFilter := filter.NewMarketCapFilter(maxCap)
+	slog.Info("Initialized market cap filter", slog.Uint64("maxCapUSD", maxCap))
+
 	engine := processor.New(processor.Config{
 		Shards:           16,
 		QueuePerShard:    2048,
@@ -40,7 +55,7 @@ func main() {
 		EWMAAlpha:        0.2,
 		AlertCooldownSec: 30,
 	}, telegramSink, metadataFetcher)
-	h := handler.NewWebhookHandler(os.Getenv("WEBHOOK_SECRET"), engine)
+	h := handler.NewWebhookHandler(os.Getenv("WEBHOOK_SECRET"), engine, capFilter, metadataFetcher)
 	app := fiber.New()
 	app.Post("/webhook", h.WebHookHandler)
 

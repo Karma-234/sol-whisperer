@@ -6,19 +6,25 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/karma-234/sol-whisperer/core/internal/detector"
+	"github.com/karma-234/sol-whisperer/core/internal/filter"
+	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 	"github.com/karma-234/sol-whisperer/core/internal/processor"
 	"github.com/karma-234/sol-whisperer/core/internal/types"
 )
 
 type WebhookHandler struct {
-	secret string
-	engine *processor.Engine
+	secret       string
+	engine       *processor.Engine
+	capFilter    *filter.MarketCapFilter
+	metaFetcher  *metadata.Fetcher
 }
 
-func NewWebhookHandler(secret string, engine *processor.Engine) *WebhookHandler {
+func NewWebhookHandler(secret string, engine *processor.Engine, capFilter *filter.MarketCapFilter, metaFetcher *metadata.Fetcher) *WebhookHandler {
 	return &WebhookHandler{
-		secret: secret,
-		engine: engine,
+		secret:      secret,
+		engine:      engine,
+		capFilter:   capFilter,
+		metaFetcher: metaFetcher,
 	}
 }
 
@@ -32,7 +38,7 @@ func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 		return c.Status(400).SendString("Invalid payload")
 	}
 	for i := range payload {
-		info := detector.ExtractSwapInfoWithOptions(payload[i], false)
+		info := detector.ExtractSwapInfoWithOptions(payload[i], false, h.capFilter, h.metaFetcher)
 		if info == nil {
 			continue
 		}

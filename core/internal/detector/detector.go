@@ -4,6 +4,8 @@ import (
 	"strconv"
 
 	"github.com/karma-234/sol-whisperer/core"
+	"github.com/karma-234/sol-whisperer/core/internal/filter"
+	"github.com/karma-234/sol-whisperer/core/internal/metadata"
 	"github.com/karma-234/sol-whisperer/core/internal/types"
 )
 
@@ -37,6 +39,7 @@ type SwapInfo struct {
 	InputMint        string
 	InputAmount      string
 	AmountInSOL      uint64 // populated when InputMint == "SOL" (in lamports)
+	MarketCap        uint64 // market cap in USD for OutputMint
 	DetectedPrograms []DetectedProgram
 	Fee              uint64
 	FeePayer         string
@@ -90,11 +93,13 @@ func DetectProgramsFromInstructions(tx types.HeliusEnhancedWebhookTx) []Detected
 
 // Default keeps old behavior.
 func ExtractSwapInfo(tx types.HeliusEnhancedWebhookTx) *SwapInfo {
-	return ExtractSwapInfoWithOptions(tx, true)
+	return ExtractSwapInfoWithOptions(tx, true, nil, nil)
 }
 
 // Set detectPrograms=false on hot paths for lower latency.
-func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms bool) *SwapInfo {
+// filter: market cap filter (optional, nil disables filtering)
+// fetcher: metadata fetcher for market cap (optional, required if filter is set)
+func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms bool, capFilter *filter.MarketCapFilter, fetcher *metadata.Fetcher) *SwapInfo {
 	if tx.Type != "SWAP" || tx.Events.Swap == nil {
 		return nil
 	}
@@ -159,6 +164,18 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 		if info.Swapper == "" {
 			info.Swapper = swap.NativeOutput.Account
 		}
+	}
+
+	// Fetch market cap for output token (for filtering and logging)
+	if fetcher != nil && info.OutputMint != "" {
+		if meta := fetcher.FetchTokenMetadata(info.OutputMint); meta != nil {
+			info.MarketCap = meta.MarketCap
+		}
+	}
+
+	// Skip if market cap exceeds threshold (filter for memes only)
+	if capFilter != nil && !capFilter.IsAllowed(info.MarketCap) {
+		return nil
 	}
 
 	return info
