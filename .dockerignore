@@ -24,6 +24,8 @@ service-account.json
 *.dll
 *.so
 *.dylib
+cmd
+main
 
 # === Go specific ===
 go.sum.bak
