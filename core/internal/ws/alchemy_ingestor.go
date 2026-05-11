@@ -163,6 +163,7 @@ func (i *Ingestor) ProcessNotification(notif *ProgramNotification) *EnrichmentTa
 
 	// Check for duplicates
 	if i.dedupCache.IsDuplicate(value.Signature) {
+		i.logger.Debug("enrichment_dedup_hit", slog.String("signature", value.Signature))
 		i.dedupDropCount++
 		return nil
 	}
@@ -182,9 +183,9 @@ func (i *Ingestor) ProcessNotification(notif *ProgramNotification) *EnrichmentTa
 	// Try to enqueue; drop if queue is full
 	select {
 	case i.enrichmentQueue <- task:
-		// Successfully queued
+		i.logger.Debug("enrichment_task_queued", slog.String("signature", value.Signature), slog.Uint64("slot", slot))
 	default:
-		i.logger.Warn("enrichment queue full, dropping task", slog.String("signature", value.Signature))
+		i.logger.Warn("enrichment_queue_full", slog.String("signature", value.Signature))
 		i.queueDropCount++
 		return nil
 	}

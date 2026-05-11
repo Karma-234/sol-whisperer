@@ -105,6 +105,7 @@ func (ate *AlchemyTxEnricher) worker(ctx context.Context, taskChan <-chan ws.Enr
 
 			// Dedup check: have we already processed this signature?
 			if _, ok := ate.processedSigs.Load(task.Signature); ok {
+				ate.logger.Debug("enricher_dedup_hit", slog.String("signature", task.Signature))
 				atomic.AddInt64(&ate.dedupCount, 1)
 				continue
 			}
@@ -134,6 +135,7 @@ func (ate *AlchemyTxEnricher) processTask(ctx context.Context, task ws.Enrichmen
 	swapInfo := ate.extractSwapInfo(task.Signature, txResp.Meta)
 	if swapInfo == nil {
 		atomic.AddInt64(&ate.failureCount, 1)
+		ate.logger.Debug("enricher_extract_failed", slog.String("signature", task.Signature), slog.String("reason", "no_swap_info"))
 		return
 	}
 

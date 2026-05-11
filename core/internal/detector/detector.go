@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"log/slog"
 	"strconv"
 
 	"github.com/karma-234/sol-whisperer/core"
@@ -101,6 +102,7 @@ func ExtractSwapInfo(tx types.HeliusEnhancedWebhookTx) *SwapInfo {
 // fetcher: metadata fetcher for market cap (optional, required if filter is set)
 func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms bool, capFilter *filter.MarketCapFilter, fetcher *metadata.Fetcher) *SwapInfo {
 	if tx.Type != "SWAP" || tx.Events.Swap == nil {
+		slog.Info("detector_non_swap_type", slog.String("signature", tx.Signature), slog.String("type", tx.Type))
 		return nil
 	}
 
@@ -146,6 +148,7 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 		out := pickOutputForSwapper(swap.TokenOutputs, info.Swapper)
 		info.OutputMint = out.Mint
 		if core.StablecoinMints[info.OutputMint] {
+			slog.Info("detector_stablecoin_filtered", slog.String("signature", tx.Signature), slog.String("mint", info.OutputMint))
 			return nil
 		}
 		info.OutputAmount = out.RawTokenAmount.TokenAmount
@@ -176,11 +179,14 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 	// Skip if input volume is too small (minimum 0.3 SOL when buying with SOL)
 	const minInputSOL = 3e8 // 0.3 SOL in lamports
 	if info.AmountInSOL > 0 && info.AmountInSOL < minInputSOL {
+		solAmount := float64(info.AmountInSOL) / 1e9
+		slog.Info("detector_min_sol_filtered", slog.String("signature", tx.Signature), slog.Float64("amount_sol", solAmount), slog.Float64("min_sol", 0.3))
 		return nil
 	}
 
 	// Skip if market cap exceeds threshold (filter for memes only)
 	if capFilter != nil && !capFilter.IsAllowed(info.MarketCap) {
+		slog.Info("detector_market_cap_filtered", slog.String("signature", tx.Signature), slog.String("mint", info.OutputMint), slog.Uint64("market_cap_usd", info.MarketCap), slog.Uint64("max_cap_usd", capFilter.MaxCap()))
 		return nil
 	}
 

@@ -129,11 +129,13 @@ func New(cfg Config, sink AlertSink, fetcher *metadata.Fetcher) *Engine {
 
 func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) error {
 	if info == nil || info.OutputMint == "" || info.OutputAmount == "" || info.Timestamp <= 0 {
+		slog.Warn("ingest_validation_failed", slog.String("reason", "nullable_or_zero_fields"))
 		return nil
 	}
 
 	amt, err := strconv.ParseUint(info.OutputAmount, 10, 64)
 	if err != nil || amt == 0 {
+		slog.Warn("ingest_validation_failed", slog.String("signature", info.Signature), slog.String("reason", "invalid_amount"))
 		return nil
 	}
 
@@ -154,6 +156,7 @@ func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) error {
 		return nil
 	default:
 		atomic.AddUint64(&e.dropped, 1)
+		slog.Warn("ingest_shard_queue_full", slog.String("signature", info.Signature), slog.String("mint", info.OutputMint), slog.Int("shard", sh))
 		return ErrShardQueueFull
 	}
 }
@@ -187,8 +190,10 @@ func (e *Engine) enqueueAlert(alert Alert) {
 	select {
 	case e.alerts <- alert:
 		atomic.AddUint64(&e.alertQueued, 1)
+		slog.Info("alert_queued", slog.String("signature", alert.Signature), slog.String("mint", alert.Mint), slog.Float64("spike_ratio", alert.SpikeRatio))
 	default:
 		atomic.AddUint64(&e.alertDropped, 1)
+		slog.Warn("alert_queue_full", slog.String("signature", alert.Signature), slog.String("mint", alert.Mint))
 	}
 }
 
@@ -206,8 +211,9 @@ func (e *Engine) runAlertWorker() {
 		cancel()
 		if err == nil {
 			atomic.AddUint64(&e.alertSent, 1)
+			slog.Info("alert_sent_success", slog.String("signature", alert.Signature), slog.String("mint", alert.Mint), slog.String("token_name", alert.TokenName))
 		} else {
-			slog.Debug("Failed to send alert", slog.String("error", err.Error()), slog.String("mint", alert.Mint))
+			slog.Warn("alert_send_failed", slog.String("signature", alert.Signature), slog.String("mint", alert.Mint), slog.String("error", err.Error()))
 		}
 	}
 }
@@ -268,11 +274,26 @@ func (s *shardState) process(ev Event) (Alert, bool) {
 		w.ewma = s.cfg.EWMAAlpha*cur + (1.0-s.cfg.EWMAAlpha)*w.ewma
 	}
 
-	if w.totalVol < s.cfg.MinVolumeRaw || w.totalCnt < s.cfg.MinTrades || w.ewma <= 0 || cur < s.cfg.SpikeMultiple*math.Max(w.ewma, 1) {
+	// Check spike detection thresholds individually with logging
+	if w.totalVol < s.cfg.MinVolumeRaw {
+		slog.Debug("shard_insufficient_volume", slog.String("mint", ev.OutputMint), slog.String("signature", ev.Signature), slog.Uint64("volume_raw", w.totalVol), slog.Uint64("min_volume", s.cfg.MinVolumeRaw))
+		return Alert{}, false
+	}
+
+	if w.totalCnt < s.cfg.MinTrades {
+		slog.Debug("shard_insufficient_trades", slog.String("mint", ev.OutputMint), slog.String("signature", ev.Signature), slog.Any("trade_count", w.totalCnt), slog.Any("min_trades", s.cfg.MinTrades))
+		return Alert{}, false
+	}
+
+	if w.ewma <= 0 || cur < s.cfg.SpikeMultiple*math.Max(w.ewma, 1) {
+		ratio := cur / math.Max(w.ewma, 1)
+		slog.Debug("shard_no_spike", slog.String("mint", ev.OutputMint), slog.String("signature", ev.Signature), slog.Float64("current_vol", cur), slog.Float64("ewma", w.ewma), slog.Float64("spike_ratio", ratio), slog.Float64("spike_multiple", s.cfg.SpikeMultiple))
 		return Alert{}, false
 	}
 
 	if ev.Timestamp-w.lastAlertSec < s.cfg.AlertCooldownSec {
+		secondsUntilNext := s.cfg.AlertCooldownSec - (ev.Timestamp - w.lastAlertSec)
+		slog.Debug("shard_cooldown_suppressed", slog.String("mint", ev.OutputMint), slog.String("signature", ev.Signature), slog.Int64("seconds_until_next", secondsUntilNext))
 		return Alert{}, false
 	}
 	w.lastAlertSec = ev.Timestamp

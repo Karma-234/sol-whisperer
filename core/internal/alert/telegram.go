@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,25 +50,31 @@ func (s *TelegramSink) Send(ctx context.Context, a processor.Alert) error {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
+		slog.Warn("alert_send_failed", slog.String("signature", a.Signature), slog.String("reason", "marshal_error"), slog.String("error", err.Error()))
 		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiURL, bytes.NewReader(body))
 	if err != nil {
+		slog.Warn("alert_send_failed", slog.String("signature", a.Signature), slog.String("reason", "request_create_error"), slog.String("error", err.Error()))
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
+		slog.Warn("alert_send_failed", slog.String("signature", a.Signature), slog.String("reason", "http_error"), slog.String("error", err.Error()))
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("telegram send failed: %s", resp.Status)
+		err := fmt.Errorf("telegram send failed: %s", resp.Status)
+		slog.Warn("alert_send_failed", slog.String("signature", a.Signature), slog.String("reason", "non_2xx_response"), slog.String("status", resp.Status))
+		return err
 	}
 
+	slog.Info("alert_sent_success", slog.String("signature", a.Signature), slog.String("token_name", a.TokenName))
 	return nil
 }
 

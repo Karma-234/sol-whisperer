@@ -30,13 +30,15 @@ func NewWebhookHandler(secret string, engine *processor.Engine, capFilter *filte
 
 func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 	if auth := c.Get("Authorization"); auth != h.secret && auth != "Bearer "+h.secret {
+		slog.Warn("webhook_auth_failed", slog.Bool("auth_present", auth != ""))
 		return c.Status(401).SendString("Unauthorized")
 	}
 	var payload types.HeliusEnhancedWebhookPayload
 	if err := c.BodyParser(&payload); err != nil {
-		slog.Info("Failed to parse webhook payload", slog.String("error", err.Error()))
+		slog.Warn("webhook_parse_failed", slog.String("error", err.Error()))
 		return c.Status(400).SendString("Invalid payload")
 	}
+	acceptedCount := 0
 	for i := range payload {
 		info := detector.ExtractSwapInfoWithOptions(payload[i], false, h.capFilter, h.metaFetcher)
 		if info == nil {
@@ -44,10 +46,16 @@ func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 		}
 		if err := h.engine.IngestSwapInfo(info); err != nil {
 			if errors.Is(err, processor.ErrShardQueueFull) {
+				slog.Warn("webhook_ingest_queue_full", slog.String("signature", info.Signature))
 				return c.Status(503).SendString("Queue full")
 			}
+			slog.Warn("webhook_ingest_failed", slog.String("signature", info.Signature), slog.String("error", err.Error()))
 			return c.Status(500).SendString("Processing failed")
 		}
+		acceptedCount++
+	}
+	if acceptedCount > 0 {
+		slog.Info("webhook_accepted", slog.Int("count", acceptedCount))
 	}
 	return c.SendStatus(200)
 }
