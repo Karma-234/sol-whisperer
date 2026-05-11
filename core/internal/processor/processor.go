@@ -19,12 +19,13 @@ import (
 var ErrShardQueueFull = errors.New("shard queue full")
 
 type Event struct {
-	Signature  string
-	Timestamp  int64
-	Swapper    string
-	OutputMint string
-	OutputAmt  uint64
-	Source     string
+	Signature   string
+	Timestamp   int64
+	Swapper     string
+	OutputMint  string
+	OutputAmt   uint64
+	AmountInSOL uint64 // lamports (populated when input is SOL)
+	Source      string
 }
 
 type Alert struct {
@@ -39,6 +40,7 @@ type Alert struct {
 	SpikeRatio   float64
 	WindowSec    int64
 	DetectedAt   int64
+	AmountInSOL  uint64 // lamports (if input was SOL)
 }
 
 type AlertSink interface {
@@ -136,12 +138,13 @@ func (e *Engine) IngestSwapInfo(info *detector.SwapInfo) error {
 	}
 
 	ev := Event{
-		Signature:  info.Signature,
-		Timestamp:  info.Timestamp,
-		Swapper:    info.Swapper,
-		OutputMint: info.OutputMint,
-		OutputAmt:  amt,
-		Source:     info.Source,
+		Signature:   info.Signature,
+		Timestamp:   info.Timestamp,
+		Swapper:     info.Swapper,
+		OutputMint:  info.OutputMint,
+		OutputAmt:   amt,
+		AmountInSOL: info.AmountInSOL,
+		Source:      info.Source,
 	}
 
 	sh := shardForMint(ev.OutputMint, len(e.shards))
@@ -285,6 +288,7 @@ func (s *shardState) process(ev Event) (Alert, bool) {
 		SpikeRatio:   cur / math.Max(w.ewma, 1),
 		WindowSec:    s.cfg.WindowSec,
 		DetectedAt:   ev.Timestamp,
+		AmountInSOL:  ev.AmountInSOL,
 	}, true
 }
 

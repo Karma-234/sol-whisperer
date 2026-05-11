@@ -1,17 +1,13 @@
 package ws
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"math/rand"
-	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -108,25 +104,11 @@ func (ac *AlchemyClient) Connect(ctx context.Context) error {
 		ac.logger.Error("failed to parse WebSocket URL", slog.String("error", err.Error()))
 		return fmt.Errorf("parse ws url: %w", err)
 	}
-	if strings.Contains(u.Host, "alchemy.com") && !strings.Contains(u.Host, "solana-") {
-		ac.logger.Warn("alchemy websocket host does not look like a Solana endpoint", slog.String("host", u.Host))
-	}
 
 	dialer := *websocket.DefaultDialer
-	conn, resp, err := dialer.DialContext(ctx, u.String(), nil)
+	conn, _, err := dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
-		logAttrs := []any{slog.String("error", err.Error())}
-		if resp != nil {
-			logAttrs = append(logAttrs,
-				slog.Int("status_code", resp.StatusCode),
-				slog.String("status", resp.Status),
-				slog.String("server", resp.Header.Get("Server")),
-			)
-			if body, readErr := readBodyPreview(resp, 512); readErr == nil && body != "" {
-				logAttrs = append(logAttrs, slog.String("response_body_preview", body))
-			}
-		}
-		ac.logger.Error("failed to connect to WebSocket", logAttrs...)
+		ac.logger.Error("failed to connect to WebSocket", slog.String("error", err.Error()))
 		return fmt.Errorf("dial ws: %w", err)
 	}
 
@@ -186,9 +168,6 @@ func (ac *AlchemyClient) Subscribe(programID string) error {
 	}
 
 	if resp.Error != nil {
-		if strings.Contains(strings.ToLower(resp.Error.Message), "method 'logssubscribe' not found") {
-			return fmt.Errorf("subscription error: %s (code=%d, data=%v). endpoint is likely not Solana PubSub; verify ALCHEMY_WS_URL uses a Solana app/key", resp.Error.Message, resp.Error.Code, resp.Error.Data)
-		}
 		return fmt.Errorf("subscription error: %s (code=%d, data=%v)", resp.Error.Message, resp.Error.Code, resp.Error.Data)
 	}
 
@@ -203,37 +182,6 @@ func (ac *AlchemyClient) Subscribe(programID string) error {
 	ac.subscriptionMu.Unlock()
 
 	ac.logger.Info("subscribed to program", slog.String("program_id", programID), slog.Int("subscription_id", int(subID)))
-	return nil
-}
-
-// VerifySolanaRPC verifies that the connected websocket endpoint supports Solana JSON-RPC methods.
-func (ac *AlchemyClient) VerifySolanaRPC() error {
-	id := ac.getNextID()
-	req := JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      id,
-		Method:  "getVersion",
-		Params:  []any{},
-	}
-
-	if err := ac.sendRequest(req); err != nil {
-		return fmt.Errorf("send getVersion probe: %w", err)
-	}
-
-	resp, err := ac.readResponse()
-	if err != nil {
-		return fmt.Errorf("read getVersion probe response: %w", err)
-	}
-
-	if resp.Error != nil {
-		return fmt.Errorf("getVersion probe failed: %s (code=%d, data=%v)", resp.Error.Message, resp.Error.Code, resp.Error.Data)
-	}
-
-	if _, ok := resp.Result.(map[string]any); !ok {
-		ac.logger.Warn("getVersion probe returned non-object result", slog.Any("result", resp.Result))
-	}
-
-	ac.logger.Info("Solana RPC capability probe succeeded")
 	return nil
 }
 
@@ -418,20 +366,4 @@ func (ac *AlchemyClient) exponentialBackoff(attempt int) time.Duration {
 	jitterAmount := expBackoff * 0.1
 	jitter := (rand.Float64() - 0.5) * 2 * jitterAmount
 	return time.Duration((expBackoff+jitter)*1000) * time.Millisecond
-}
-
-func readBodyPreview(resp *http.Response, maxBytes int64) (string, error) {
-	if resp == nil || resp.Body == nil || maxBytes <= 0 {
-		return "", nil
-	}
-	defer resp.Body.Close()
-
-	limited := io.LimitReader(resp.Body, maxBytes)
-	body, err := io.ReadAll(limited)
-	if err != nil {
-		return "", err
-	}
-
-	body = bytes.TrimSpace(body)
-	return string(body), nil
 }

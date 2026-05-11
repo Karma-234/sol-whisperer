@@ -1,6 +1,8 @@
 package detector
 
 import (
+	"strconv"
+
 	"github.com/karma-234/sol-whisperer/core"
 	"github.com/karma-234/sol-whisperer/core/internal/types"
 )
@@ -34,6 +36,7 @@ type SwapInfo struct {
 	OutputDecimals   uint8
 	InputMint        string
 	InputAmount      string
+	AmountInSOL      uint64 // populated when InputMint == "SOL" (in lamports)
 	DetectedPrograms []DetectedProgram
 	Fee              uint64
 	FeePayer         string
@@ -125,6 +128,9 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 	} else if swap.NativeInput != nil {
 		info.InputMint = "SOL"
 		info.InputAmount = swap.NativeInput.Amount
+		if amt, err := parseUint64(swap.NativeInput.Amount); err == nil {
+			info.AmountInSOL = amt
+		}
 		if info.Swapper == "" {
 			info.Swapper = swap.NativeInput.Account
 		}
@@ -147,6 +153,9 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 		info.OutputMint = "SOL"
 		info.OutputAmount = swap.NativeOutput.Amount
 		info.OutputDecimals = 9
+		if amt, err := parseUint64(swap.NativeOutput.Amount); err == nil {
+			info.AmountInSOL = amt
+		}
 		if info.Swapper == "" {
 			info.Swapper = swap.NativeOutput.Account
 		}
@@ -185,4 +194,8 @@ func pickInputForSwapper(inputs []types.HeliusTokenAmountEvent, swapper string) 
 	}
 
 	return inputs[0]
+}
+
+func parseUint64(s string) (uint64, error) {
+	return strconv.ParseUint(s, 10, 64)
 }

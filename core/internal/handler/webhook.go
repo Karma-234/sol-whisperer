@@ -26,7 +26,6 @@ func (h *WebhookHandler) WebHookHandler(c *fiber.Ctx) error {
 	if auth := c.Get("Authorization"); auth != h.secret && auth != "Bearer "+h.secret {
 		return c.Status(401).SendString("Unauthorized")
 	}
-	slog.Info("Received webhook", slog.String("body", string(c.Body())))
 	var payload types.HeliusEnhancedWebhookPayload
 	if err := c.BodyParser(&payload); err != nil {
 		slog.Info("Failed to parse webhook payload", slog.String("error", err.Error()))
