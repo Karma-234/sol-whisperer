@@ -13,10 +13,10 @@ import (
 )
 
 type WebhookHandler struct {
-	secret       string
-	engine       *processor.Engine
-	capFilter    *filter.MarketCapFilter
-	metaFetcher  *metadata.Fetcher
+	secret      string
+	engine      *processor.Engine
+	capFilter   *filter.MarketCapFilter
+	metaFetcher *metadata.Fetcher
 }
 
 func NewWebhookHandler(secret string, engine *processor.Engine, capFilter *filter.MarketCapFilter, metaFetcher *metadata.Fetcher) *WebhookHandler {

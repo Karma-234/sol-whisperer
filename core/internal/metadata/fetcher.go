@@ -14,8 +14,8 @@ import (
 )
 
 type TokenMetadata struct {
-	Symbol   string
-	Name     string
+	Symbol    string
+	Name      string
 	MarketCap uint64 // in USD
 }
 
@@ -238,8 +238,8 @@ func (f *Fetcher) fetchFromDexScreener(mint string) {
 	var result struct {
 		Pairs []struct {
 			BaseToken struct {
-				Symbol    string `json:"symbol"`
-				Name      string `json:"name"`
+				Symbol string `json:"symbol"`
+				Name   string `json:"name"`
 			} `json:"baseToken"`
 			FDV float64 `json:"fdv"` // fully diluted valuation (market cap proxy)
 		} `json:"pairs"`
