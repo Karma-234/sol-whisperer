@@ -8,7 +8,7 @@ type MarketCapFilter struct {
 // NewMarketCapFilter creates a new market cap filter with the given threshold in USD.
 func NewMarketCapFilter(maxCapUSD uint64) *MarketCapFilter {
 	if maxCapUSD == 0 {
-		maxCapUSD = 50_000 // default: $50K
+		maxCapUSD = 200_000 // default: $200K
 	}
 	return &MarketCapFilter{
 		maxCapUSD: maxCapUSD,

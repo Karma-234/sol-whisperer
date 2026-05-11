@@ -173,6 +173,12 @@ func ExtractSwapInfoWithOptions(tx types.HeliusEnhancedWebhookTx, detectPrograms
 		}
 	}
 
+	// Skip if input volume is too small (minimum 5 SOL when buying with SOL)
+	const minInputSOL = 5e9 // 5 SOL in lamports
+	if info.AmountInSOL > 0 && info.AmountInSOL < minInputSOL {
+		return nil
+	}
+
 	// Skip if market cap exceeds threshold (filter for memes only)
 	if capFilter != nil && !capFilter.IsAllowed(info.MarketCap) {
 		return nil
